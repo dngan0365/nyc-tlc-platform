@@ -1,0 +1,55 @@
+name: nyc_tlc
+version: "1.0.0"
+config-version: 2
+
+profile: nyc_tlc
+
+# ── Path layout ──────────────────────────────────────────────────────────────
+model-paths:      ["models"]
+macro-paths:      ["macros"]
+test-paths:       ["tests"]
+analysis-paths:   ["analyses"]
+snapshot-paths:   ["snapshots"]
+seed-paths:       ["seeds"]
+docs-paths:       ["docs"]
+
+target-path:      "target"
+clean-targets:    ["target", "dbt_packages"]
+
+# ── Materialisation defaults by layer ────────────────────────────────────────
+#
+#   staging      → views  (no storage cost, always fresh)
+#   intermediate → views  (join logic, no own storage)
+#   marts        → tables by default; fact_trips overrides to incremental
+#
+models:
+  nyc_tlc:
+    staging:
+      +materialized: view
+      +schema: staging
+
+    intermediate:
+      +materialized: view
+      +schema: intermediate
+
+    marts:
+      +materialized: table
+      +schema: marts
+
+      # fact_trips is large — override to incremental in its own config block
+      fact_trips:
+        +materialized: incremental
+        +incremental_strategy: insert_overwrite   # Athena / Hive partitioned tables
+        +partition_by: ["pickup_date"]
+
+# ── Project-wide variables ────────────────────────────────────────────────────
+vars:
+  # Earliest partition to back-fill when running full-refresh
+  start_date: "2023-01-01"
+
+  # Used by the replace_where macro to scope incremental overwrites
+  incremental_predicates:
+    - "pickup_date >= '{{ var('start_date') }}'"
+
+  # Taxi zone lookup seed table name (loaded via dbt seed)
+  taxi_zone_lookup: "taxi_zone_lookup"

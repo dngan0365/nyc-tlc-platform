@@ -1,0 +1,71 @@
+{
+  "athena_results_bucket_name": {
+    "sensitive": false,
+    "type": "string",
+    "value": "nyc-tlc-athena-results-dev-861276091613"
+  },
+  "athena_results_s3_path": {
+    "sensitive": false,
+    "type": "string",
+    "value": "s3://nyc-tlc-athena-results-dev-861276091613/results/"
+  },
+  "athena_workgroup_name": {
+    "sensitive": false,
+    "type": "string",
+    "value": "nyc-tlc-dev"
+  },
+  "datalake_bucket_name": {
+    "sensitive": false,
+    "type": "string",
+    "value": "nyc-tlc-datalake-dev-861276091613"
+  },
+  "emr_application_id": {
+    "sensitive": false,
+    "type": "string",
+    "value": "00g5peoev9ao1m25"
+  },
+  "emr_execution_role_arn": {
+    "sensitive": false,
+    "type": "string",
+    "value": "arn:aws:iam::861276091613:role/nyc-tlc-emr-execution-dev"
+  },
+  "emr_logs_bucket_name": {
+    "sensitive": false,
+    "type": "string",
+    "value": "nyc-tlc-emr-logs-dev-861276091613"
+  },
+  "glue_database_bronze": {
+    "sensitive": false,
+    "type": "string",
+    "value": "nyc_tlc_bronze"
+  },
+  "glue_database_gold": {
+    "sensitive": false,
+    "type": "string",
+    "value": "nyc_tlc_gold"
+  },
+  "glue_database_silver": {
+    "sensitive": false,
+    "type": "string",
+    "value": "nyc_tlc_silver"
+  },
+  "private_subnet_ids": {
+    "sensitive": false,
+    "type": [
+      "tuple",
+      [
+        "string",
+        "string"
+      ]
+    ],
+    "value": [
+      "subnet-0ed7b8ef1e15bb09c",
+      "subnet-0f0c848366525c892"
+    ]
+  },
+  "vpc_id": {
+    "sensitive": false,
+    "type": "string",
+    "value": "vpc-023f88e7528061962"
+  }
+}

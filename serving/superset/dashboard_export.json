@@ -1,0 +1,413 @@
+{
+  "version": "1.0.0",
+  "type": "Dashboard",
+  "timestamp": "2024-01-15T00:00:00Z",
+  "metadata": {
+    "title": "NYC TLC Analytics Dashboard",
+    "description": "NYC Taxi & Limousine Commission — operational and business KPIs over the Gold layer (Athena).",
+    "color_scheme": "bnbColors",
+    "owners": [],
+    "tags": ["nyc-tlc", "data-lakehouse", "gold"]
+  },
+  "dashboard_title": "NYC TLC Analytics",
+  "slug": "nyc-tlc-analytics",
+  "position_json": {
+    "GRID_ID": {
+      "children": [
+        "ROW-kpi-strip",
+        "ROW-time-series",
+        "ROW-geo-and-payment",
+        "ROW-top-zones"
+      ],
+      "id": "GRID_ID",
+      "type": "GRID"
+    },
+    "ROW-kpi-strip": {
+      "children": [
+        "CHART-total-trips",
+        "CHART-avg-fare",
+        "CHART-avg-distance",
+        "CHART-avg-duration"
+      ],
+      "id": "ROW-kpi-strip",
+      "meta": { "background": "BACKGROUND_TRANSPARENT" },
+      "type": "ROW"
+    },
+    "CHART-total-trips": {
+      "children": [],
+      "id": "CHART-total-trips",
+      "meta": { "chartId": 1, "width": 3, "height": 8 },
+      "type": "CHART"
+    },
+    "CHART-avg-fare": {
+      "children": [],
+      "id": "CHART-avg-fare",
+      "meta": { "chartId": 2, "width": 3, "height": 8 },
+      "type": "CHART"
+    },
+    "CHART-avg-distance": {
+      "children": [],
+      "id": "CHART-avg-distance",
+      "meta": { "chartId": 3, "width": 3, "height": 8 },
+      "type": "CHART"
+    },
+    "CHART-avg-duration": {
+      "children": [],
+      "id": "CHART-avg-duration",
+      "meta": { "chartId": 4, "width": 3, "height": 8 },
+      "type": "CHART"
+    },
+    "ROW-time-series": {
+      "children": ["CHART-hourly-trips", "CHART-daily-revenue"],
+      "id": "ROW-time-series",
+      "meta": { "background": "BACKGROUND_TRANSPARENT" },
+      "type": "ROW"
+    },
+    "CHART-hourly-trips": {
+      "children": [],
+      "id": "CHART-hourly-trips",
+      "meta": { "chartId": 5, "width": 6, "height": 14 },
+      "type": "CHART"
+    },
+    "CHART-daily-revenue": {
+      "children": [],
+      "id": "CHART-daily-revenue",
+      "meta": { "chartId": 6, "width": 6, "height": 14 },
+      "type": "CHART"
+    },
+    "ROW-geo-and-payment": {
+      "children": ["CHART-payment-type", "CHART-cab-type-split"],
+      "id": "ROW-geo-and-payment",
+      "meta": { "background": "BACKGROUND_TRANSPARENT" },
+      "type": "ROW"
+    },
+    "CHART-payment-type": {
+      "children": [],
+      "id": "CHART-payment-type",
+      "meta": { "chartId": 7, "width": 4, "height": 14 },
+      "type": "CHART"
+    },
+    "CHART-cab-type-split": {
+      "children": [],
+      "id": "CHART-cab-type-split",
+      "meta": { "chartId": 8, "width": 8, "height": 14 },
+      "type": "CHART"
+    },
+    "ROW-top-zones": {
+      "children": ["CHART-top-pickup-zones", "CHART-top-dropoff-zones"],
+      "id": "ROW-top-zones",
+      "meta": { "background": "BACKGROUND_TRANSPARENT" },
+      "type": "ROW"
+    },
+    "CHART-top-pickup-zones": {
+      "children": [],
+      "id": "CHART-top-pickup-zones",
+      "meta": { "chartId": 9, "width": 6, "height": 18 },
+      "type": "CHART"
+    },
+    "CHART-top-dropoff-zones": {
+      "children": [],
+      "id": "CHART-top-dropoff-zones",
+      "meta": { "chartId": 10, "width": 6, "height": 18 },
+      "type": "CHART"
+    }
+  },
+  "metadata_version": "1.0.0",
+  "databases": {
+    "nyc_tlc_athena": {
+      "database_name": "nyc_tlc_athena",
+      "sqlalchemy_uri": "awsathena+rest://@athena.{AWS_REGION}.amazonaws.com/{ATHENA_DATABASE}?s3_staging_dir={ATHENA_RESULTS_BUCKET}&work_group={ATHENA_WORKGROUP}",
+      "extra": {
+        "engine_params": { "connect_args": {} },
+        "metadata_params": {},
+        "schemas_allowed_for_file_upload": []
+      }
+    }
+  },
+  "datasets": [
+    {
+      "table_name": "mart_hourly_kpi",
+      "schema": "nyc_tlc_gold",
+      "database": "nyc_tlc_athena",
+      "sql": "",
+      "description": "Pre-aggregated hourly KPI OBT — primary source for all dashboard charts.",
+      "columns": [
+        { "column_name": "pickup_date",      "type": "DATE",    "is_dttm": true },
+        { "column_name": "pickup_hour",      "type": "INTEGER", "is_dttm": false },
+        { "column_name": "cab_type",         "type": "VARCHAR", "is_dttm": false },
+        { "column_name": "pickup_zone",      "type": "VARCHAR", "is_dttm": false },
+        { "column_name": "dropoff_zone",     "type": "VARCHAR", "is_dttm": false },
+        { "column_name": "borough",          "type": "VARCHAR", "is_dttm": false },
+        { "column_name": "payment_type",     "type": "VARCHAR", "is_dttm": false },
+        { "column_name": "trip_count",       "type": "BIGINT",  "is_dttm": false },
+        { "column_name": "total_revenue",    "type": "DOUBLE",  "is_dttm": false },
+        { "column_name": "avg_fare_amount",  "type": "DOUBLE",  "is_dttm": false },
+        { "column_name": "avg_trip_distance","type": "DOUBLE",  "is_dttm": false },
+        { "column_name": "avg_duration_min", "type": "DOUBLE",  "is_dttm": false },
+        { "column_name": "avg_tip_amount",   "type": "DOUBLE",  "is_dttm": false }
+      ],
+      "metrics": [
+        {
+          "metric_name": "total_trips",
+          "expression": "SUM(trip_count)",
+          "description": "Total number of trips in the selected period"
+        },
+        {
+          "metric_name": "total_revenue",
+          "expression": "SUM(total_revenue)",
+          "description": "Sum of all fare revenue"
+        },
+        {
+          "metric_name": "avg_fare",
+          "expression": "AVG(avg_fare_amount)",
+          "description": "Average fare amount per trip"
+        },
+        {
+          "metric_name": "avg_distance_mi",
+          "expression": "AVG(avg_trip_distance)",
+          "description": "Average trip distance in miles"
+        },
+        {
+          "metric_name": "avg_duration_minutes",
+          "expression": "AVG(avg_duration_min)",
+          "description": "Average trip duration in minutes"
+        }
+      ]
+    }
+  ],
+  "charts": [
+    {
+      "slice_name": "Total Trips",
+      "id": 1,
+      "viz_type": "big_number_total",
+      "datasource": "mart_hourly_kpi",
+      "query_context": {
+        "metrics": ["total_trips"],
+        "groupby": [],
+        "time_range": "Last year"
+      },
+      "params": {
+        "metric": "total_trips",
+        "subheader": "trips in selected period",
+        "y_axis_format": ",.0f",
+        "time_range": "Last year"
+      }
+    },
+    {
+      "slice_name": "Average Fare",
+      "id": 2,
+      "viz_type": "big_number_total",
+      "datasource": "mart_hourly_kpi",
+      "query_context": {
+        "metrics": ["avg_fare"],
+        "groupby": [],
+        "time_range": "Last year"
+      },
+      "params": {
+        "metric": "avg_fare",
+        "subheader": "avg fare (USD)",
+        "y_axis_format": "$,.2f",
+        "time_range": "Last year"
+      }
+    },
+    {
+      "slice_name": "Average Trip Distance (mi)",
+      "id": 3,
+      "viz_type": "big_number_total",
+      "datasource": "mart_hourly_kpi",
+      "query_context": {
+        "metrics": ["avg_distance_mi"],
+        "groupby": [],
+        "time_range": "Last year"
+      },
+      "params": {
+        "metric": "avg_distance_mi",
+        "subheader": "miles",
+        "y_axis_format": ",.2f",
+        "time_range": "Last year"
+      }
+    },
+    {
+      "slice_name": "Average Trip Duration (min)",
+      "id": 4,
+      "viz_type": "big_number_total",
+      "datasource": "mart_hourly_kpi",
+      "query_context": {
+        "metrics": ["avg_duration_minutes"],
+        "groupby": [],
+        "time_range": "Last year"
+      },
+      "params": {
+        "metric": "avg_duration_minutes",
+        "subheader": "minutes",
+        "y_axis_format": ",.1f",
+        "time_range": "Last year"
+      }
+    },
+    {
+      "slice_name": "Trips by Hour of Day",
+      "id": 5,
+      "viz_type": "echarts_timeseries_bar",
+      "datasource": "mart_hourly_kpi",
+      "query_context": {
+        "metrics": ["total_trips"],
+        "groupby": ["pickup_hour"],
+        "time_range": "Last year",
+        "time_grain_sqla": "PT1H",
+        "order_by_cols": ["pickup_hour"]
+      },
+      "params": {
+        "x_axis": "pickup_hour",
+        "metrics": ["total_trips"],
+        "groupby": [],
+        "y_axis_title": "Trip Count",
+        "x_axis_title": "Hour of Day",
+        "y_axis_format": ",.0f",
+        "color_scheme": "bnbColors",
+        "show_legend": false
+      }
+    },
+    {
+      "slice_name": "Daily Revenue Trend",
+      "id": 6,
+      "viz_type": "echarts_timeseries_line",
+      "datasource": "mart_hourly_kpi",
+      "query_context": {
+        "metrics": ["total_revenue"],
+        "groupby": ["cab_type"],
+        "time_range": "Last year",
+        "time_grain_sqla": "P1D",
+        "time_column": "pickup_date"
+      },
+      "params": {
+        "x_axis": "pickup_date",
+        "metrics": ["total_revenue"],
+        "groupby": ["cab_type"],
+        "y_axis_title": "Revenue (USD)",
+        "y_axis_format": "$,.0f",
+        "color_scheme": "bnbColors",
+        "show_legend": true,
+        "rich_tooltip": true,
+        "rolling_type": "mean",
+        "rolling_periods": 7,
+        "rolling_min_periods": 1
+      }
+    },
+    {
+      "slice_name": "Payment Type Breakdown",
+      "id": 7,
+      "viz_type": "pie",
+      "datasource": "mart_hourly_kpi",
+      "query_context": {
+        "metrics": ["total_trips"],
+        "groupby": ["payment_type"],
+        "time_range": "Last year"
+      },
+      "params": {
+        "metric": "total_trips",
+        "groupby": ["payment_type"],
+        "color_scheme": "bnbColors",
+        "show_legend": true,
+        "show_labels": true,
+        "label_type": "key_percent",
+        "outer_radius": 70,
+        "donut": true
+      }
+    },
+    {
+      "slice_name": "Yellow vs Green — Trip Share by Borough",
+      "id": 8,
+      "viz_type": "echarts_timeseries_bar",
+      "datasource": "mart_hourly_kpi",
+      "query_context": {
+        "metrics": ["total_trips"],
+        "groupby": ["borough", "cab_type"],
+        "time_range": "Last year"
+      },
+      "params": {
+        "x_axis": "borough",
+        "metrics": ["total_trips"],
+        "groupby": ["cab_type"],
+        "bar_stacked": true,
+        "y_axis_title": "Trip Count",
+        "x_axis_title": "Borough",
+        "y_axis_format": ",.0f",
+        "color_scheme": "bnbColors",
+        "show_legend": true
+      }
+    },
+    {
+      "slice_name": "Top 15 Pickup Zones",
+      "id": 9,
+      "viz_type": "echarts_timeseries_bar",
+      "datasource": "mart_hourly_kpi",
+      "query_context": {
+        "metrics": ["total_trips"],
+        "groupby": ["pickup_zone"],
+        "time_range": "Last year",
+        "row_limit": 15,
+        "order_desc": true
+      },
+      "params": {
+        "x_axis": "pickup_zone",
+        "metrics": ["total_trips"],
+        "groupby": [],
+        "orient": "horizontal",
+        "y_axis_format": ",.0f",
+        "color_scheme": "bnbColors",
+        "show_legend": false
+      }
+    },
+    {
+      "slice_name": "Top 15 Drop-off Zones",
+      "id": 10,
+      "viz_type": "echarts_timeseries_bar",
+      "datasource": "mart_hourly_kpi",
+      "query_context": {
+        "metrics": ["total_trips"],
+        "groupby": ["dropoff_zone"],
+        "time_range": "Last year",
+        "row_limit": 15,
+        "order_desc": true
+      },
+      "params": {
+        "x_axis": "dropoff_zone",
+        "metrics": ["total_trips"],
+        "groupby": [],
+        "orient": "horizontal",
+        "y_axis_format": ",.0f",
+        "color_scheme": "bnbColors",
+        "show_legend": false
+      }
+    }
+  ],
+  "native_filter_configuration": [
+    {
+      "id": "NATIVE_FILTER-date-range",
+      "name": "Date Range",
+      "type": "NATIVE_FILTER",
+      "filterType": "filter_time",
+      "targets": [{ "datasetId": "mart_hourly_kpi", "column": { "name": "pickup_date" } }],
+      "defaultDataMask": { "extraFormData": { "time_range": "Last year" } },
+      "controlValues": { "enableEmptyFilter": false }
+    },
+    {
+      "id": "NATIVE_FILTER-cab-type",
+      "name": "Cab Type",
+      "type": "NATIVE_FILTER",
+      "filterType": "filter_select",
+      "targets": [{ "datasetId": "mart_hourly_kpi", "column": { "name": "cab_type" } }],
+      "controlValues": { "enableEmptyFilter": false, "multiSelect": true, "defaultToFirstItem": false },
+      "defaultDataMask": { "filterState": { "value": null } }
+    },
+    {
+      "id": "NATIVE_FILTER-borough",
+      "name": "Borough",
+      "type": "NATIVE_FILTER",
+      "filterType": "filter_select",
+      "targets": [{ "datasetId": "mart_hourly_kpi", "column": { "name": "borough" } }],
+      "controlValues": { "enableEmptyFilter": false, "multiSelect": true },
+      "defaultDataMask": { "filterState": { "value": null } }
+    }
+  ]
+}

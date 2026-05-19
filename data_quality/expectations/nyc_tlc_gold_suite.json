@@ -1,0 +1,150 @@
+{
+  "data_asset_type": null,
+  "expectation_suite_name": "nyc_tlc_gold_suite",
+  "meta": {
+    "great_expectations_version": "0.18.x",
+    "description": "Data quality suite for the gold-zone fact_trips table. Seven expectations split into two severity tiers: CRITICAL (quarantine the partition on failure) and WARNING (emit a CloudWatch metric but continue the pipeline).",
+    "owner": "data-engineering",
+    "created": "2024-01-01",
+    "checks": {
+      "critical": [
+        "expect_table_row_count_to_be_between",
+        "expect_column_values_to_not_be_null__trip_key",
+        "expect_column_values_to_not_be_null__pickup_date",
+        "expect_column_pair_values_to_be_equal__zone_ids"
+      ],
+      "warning": [
+        "expect_column_values_to_be_between__fare_amount",
+        "expect_column_values_to_be_between__trip_duration",
+        "expect_column_values_to_be_in_set__cab_type"
+      ]
+    }
+  },
+  "expectations": [
+
+    {
+      "expectation_type": "expect_table_row_count_to_be_between",
+      "kwargs": {
+        "min_value": 1000,
+        "max_value": 5000000
+      },
+      "meta": {
+        "severity": "CRITICAL",
+        "check_id": "CHK-001",
+        "description": "Partition must have between 1 000 and 5 000 000 rows. Fewer than 1 000 suggests a failed ingestion or empty source file. More than 5 M suggests a partition explosion or duplicate load.",
+        "quarantine_on_failure": true
+      }
+    },
+
+    {
+      "expectation_type": "expect_column_values_to_not_be_null",
+      "kwargs": {
+        "column": "trip_key",
+        "mostly": 1.0
+      },
+      "meta": {
+        "severity": "CRITICAL",
+        "check_id": "CHK-002",
+        "description": "Surrogate key must never be null. A null trip_key means the xxhash derivation failed upstream, making downstream joins unreliable.",
+        "quarantine_on_failure": true
+      }
+    },
+
+    {
+      "expectation_type": "expect_column_values_to_not_be_null",
+      "kwargs": {
+        "column": "pickup_date",
+        "mostly": 1.0
+      },
+      "meta": {
+        "severity": "CRITICAL",
+        "check_id": "CHK-003",
+        "description": "pickup_date is the partition key. A null value means the row cannot be routed to a partition and will corrupt the table layout.",
+        "quarantine_on_failure": true
+      }
+    },
+
+    {
+      "expectation_type": "expect_column_values_to_be_between",
+      "kwargs": {
+        "column": "pickup_location_id",
+        "min_value": 1,
+        "max_value": 265,
+        "mostly": 0.99
+      },
+      "meta": {
+        "severity": "CRITICAL",
+        "check_id": "CHK-004",
+        "description": "Pickup zone ID must be in the official TLC range 1–265. More than 1% out-of-range indicates a join key issue between trips and the zone lookup, breaking dim_location foreign key integrity.",
+        "quarantine_on_failure": true
+      }
+    },
+
+    {
+      "expectation_type": "expect_column_values_to_be_between",
+      "kwargs": {
+        "column": "dropoff_location_id",
+        "min_value": 1,
+        "max_value": 265,
+        "mostly": 0.99
+      },
+      "meta": {
+        "severity": "CRITICAL",
+        "check_id": "CHK-004b",
+        "description": "Dropoff zone ID must be in the official TLC range 1–265. Paired with CHK-004; both fire together under the zone validity check.",
+        "quarantine_on_failure": true
+      }
+    },
+
+    {
+      "expectation_type": "expect_column_values_to_be_between",
+      "kwargs": {
+        "column": "fare_amount",
+        "min_value": 0.0,
+        "max_value": 2000.0,
+        "mostly": 0.995
+      },
+      "meta": {
+        "severity": "WARNING",
+        "check_id": "CHK-005",
+        "description": "Fare amount should be between $0 and $2 000. Values below 0 are refunds or data errors. Values above $2 000 are statistically implausible for NYC taxi trips and likely indicate upstream encoding issues. Threshold is 99.5% — a small number of edge cases (negotiated fares, test rows) are tolerated.",
+        "quarantine_on_failure": false,
+        "cloudwatch_metric": "nyc_tlc/dq/fare_amount_out_of_range_pct"
+      }
+    },
+
+    {
+      "expectation_type": "expect_column_values_to_be_between",
+      "kwargs": {
+        "column": "trip_duration_seconds",
+        "min_value": 30,
+        "max_value": 10800,
+        "mostly": 0.99
+      },
+      "meta": {
+        "severity": "WARNING",
+        "check_id": "CHK-006",
+        "description": "Trip duration should be between 30 seconds and 3 hours (10 800 s). Sub-30s trips are meter errors or cancelled rides. Over 3h suggests a stuck meter or timestamp bug. Threshold is 99% — airport trips and bridge traffic can legitimately push close to 3h.",
+        "quarantine_on_failure": false,
+        "cloudwatch_metric": "nyc_tlc/dq/trip_duration_out_of_range_pct"
+      }
+    },
+
+    {
+      "expectation_type": "expect_column_values_to_be_in_set",
+      "kwargs": {
+        "column": "cab_type",
+        "value_set": ["yellow", "green"]
+      },
+      "meta": {
+        "severity": "WARNING",
+        "check_id": "CHK-007",
+        "description": "cab_type must be exactly 'yellow' or 'green'. Any other value means a new cab type was added to the TLC source (e.g. FHV, HVFHV) and landed in the pipeline without a schema update. A warning lets the team add support without stopping the pipeline.",
+        "quarantine_on_failure": false,
+        "cloudwatch_metric": "nyc_tlc/dq/unknown_cab_type_count"
+      }
+    }
+
+  ],
+  "ge_cloud_id": null
+}

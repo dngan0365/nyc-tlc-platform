@@ -1,0 +1,39 @@
+# profiles.yml.example
+# ─────────────────────────────────────────────────────────────────────────────
+# Copy this file to ~/.dbt/profiles.yml (or ./profiles.yml for local dev)
+# and fill in the values from `terraform output`.
+#
+# Required env vars (set in .env or CI secrets):
+#   DBT_AWS_REGION          — e.g. us-east-1
+#   DBT_S3_STAGING_DIR      — value of `terraform output athena_results_s3_path`
+#   DBT_ATHENA_WORKGROUP    — value of `terraform output athena_workgroup_name`
+#   AWS_ACCESS_KEY_ID   — or use an IAM role / instance profile
+#   AWS_SECRET_ACCESS_KEY
+# ─────────────────────────────────────────────────────────────────────────────
+
+nyc_tlc:
+  target: dev
+
+  outputs:
+    dev:
+      type: athena
+      region_name:       "{{ env_var('DBT_AWS_REGION') }}"
+      s3_staging_dir:    "s3://nyc-tlc-athena-results-dev-861276091613/results/"
+      database:          AwsDataCatalog   # always this — it's the Glue catalog
+      schema:            nyc_tlc_gold     # default schema; overridden per layer
+      workgroup:         nyc-tlc-dev
+      threads:           4
+      aws_access_key_id:     "{{ env_var('AWS_ACCESS_KEY_ID', '') }}"
+      aws_secret_access_key: "{{ env_var('AWS_SECRET_ACCESS_KEY', '') }}"
+      # Leave access key vars empty to fall back to instance profile / IAM role
+
+    prod:
+      type: athena
+      region_name:       "{{ env_var('DBT_AWS_REGION') }}"
+      s3_staging_dir:    "s3://nyc-tlc-athena-results-dev-861276091613/results/"
+      database:          AwsDataCatalog   # always this — it's the Glue catalog
+      schema:            nyc_tlc_gold     # default schema; overridden per layer
+      workgroup:         nyc-tlc-dev
+      threads:           4
+      aws_access_key_id:     "{{ env_var('AWS_ACCESS_KEY_ID', '') }}"
+      aws_secret_access_key: "{{ env_var('AWS_SECRET_ACCESS_KEY', '') }}"

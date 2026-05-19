@@ -1,0 +1,321 @@
+# models/marts/schema.yml
+# ─────────────────────────────────────────────────────────────────────────────
+# dbt tests + documentation for all mart models.
+#
+# Test taxonomy used here:
+#   not_null        — column must never be NULL
+#   unique          — column (or combo) must be unique within the model
+#   accepted_values — column must only contain the listed values
+#   relationships   — FK integrity against a dimension table
+#   dbt_utils tests are commented out; uncomment if dbt-utils is installed.
+# ─────────────────────────────────────────────────────────────────────────────
+
+version: 2
+
+models:
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # FACT_TRIPS
+  # ─────────────────────────────────────────────────────────────────────────
+  - name: fact_trips
+    description: >
+      Grain: one row per individual taxi trip (yellow or green).
+      Incrementally updated daily, partitioned by pickup_date.
+      Surrogate key trip_key is a deterministic xxhash64 of
+      (pickup_at, pickup_location_id, dropoff_location_id, cab_type).
+
+    columns:
+
+      - name: trip_key
+        description: "Surrogate key — deterministic hash of pickup timestamp + location IDs + cab type."
+        data_tests:
+          - not_null
+          - unique
+
+      - name: pickup_date
+        description: "Calendar date of trip pickup. Partition column."
+        data_tests:
+          - not_null
+
+      - name: pickup_at
+        description: "Full timestamp of trip pickup."
+        data_tests:
+          - not_null
+
+      - name: dropoff_at
+        description: "Full timestamp of trip dropoff."
+        data_tests:
+          - not_null
+
+      - name: pickup_hour
+        description: "Hour of day (0–23) extracted from pickup_at."
+        data_tests:
+          - not_null
+          - accepted_values:
+              values: [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23]
+
+      - name: cab_type
+        description: "Cab type: yellow or green."
+        data_tests:
+          - not_null
+          - accepted_values:
+              values: ['yellow', 'green']
+
+      - name: pickup_location_id
+        description: "TLC taxi zone ID for trip pickup (1–265)."
+        data_tests:
+          - not_null
+          - relationships:
+              to: ref('dim_location')
+              field: location_id
+
+      - name: dropoff_location_id
+        description: "TLC taxi zone ID for trip dropoff (1–265)."
+        data_tests:
+          - not_null
+          - relationships:
+              to: ref('dim_location')
+              field: location_id
+
+      - name: payment_type
+        description: "Human-readable payment method resolved from payment_type_id."
+        data_tests:
+          - accepted_values:
+              values:
+                - 'Credit card'
+                - 'Cash'
+                - 'No charge'
+                - 'Dispute'
+                - 'Unknown'
+                - 'Voided trip'
+
+      - name: passenger_count
+        description: "Number of passengers. May be 0 for app-dispatched trips."
+
+      - name: trip_distance_miles
+        description: "Trip distance as reported by the meter, in miles."
+        data_tests:
+          - not_null
+
+      - name: trip_duration_seconds
+        description: "Elapsed seconds between pickup and dropoff timestamps."
+        data_tests:
+          - not_null
+
+      - name: fare_amount
+        description: "Base metered fare, in USD."
+        data_tests:
+          - not_null
+
+      - name: tip_amount
+        description: "Tip amount, in USD. Cash tips are typically not recorded."
+
+      - name: total_amount
+        description: "Total amount charged to the passenger, in USD."
+        data_tests:
+          - not_null
+
+      - name: tip_pct
+        description: "Tip as a percentage of fare_amount. NULL when fare_amount = 0."
+
+      - name: avg_speed_mph
+        description: "Derived average speed in mph. NULL when duration = 0."
+
+      - name: revenue_per_mile
+        description: "Derived revenue per mile. NULL when distance = 0."
+
+      - name: congestion_surcharge
+        description: "Congestion surcharge applied for trips in/out of Manhattan below 96th St."
+
+      - name: airport_fee
+        description: "Airport pickup fee. Applies to yellow trips only; NULL for green."
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # DIM_LOCATION
+  # ─────────────────────────────────────────────────────────────────────────
+  - name: dim_location
+    description: >
+      NYC TLC taxi zone dimension. 263 official zones plus zones 264
+      (Unknown) and 265 (N/A) that appear in trip records.
+      Grain: one row per location_id.
+
+    columns:
+
+      - name: location_id
+        description: "TLC taxi zone ID (1–265). Primary key."
+        data_tests:
+          - not_null
+          - unique
+
+      - name: zone_name
+        description: "Official TLC zone name (e.g. 'JFK Airport', 'Times Sq/Theatre District')."
+        data_tests:
+          - not_null
+
+      - name: borough
+        description: "NYC borough containing the zone."
+        data_tests:
+          - not_null
+          - accepted_values:
+              values:
+                - 'Manhattan'
+                - 'Brooklyn'
+                - 'Queens'
+                - 'Bronx'
+                - 'Staten Island'
+                - 'EWR'
+                - 'Unknown'
+
+      - name: service_zone
+        description: "TLC service zone classification (Yellow Zone, Boro Zone, Airports)."
+        data_tests:
+          - accepted_values:
+              values:
+                - 'Yellow Zone'
+                - 'Boro Zone'
+                - 'Airports'
+                - 'N/A'
+
+      - name: borough_group
+        description: "Simplified grouping: Manhattan vs Outer boroughs vs Unknown / EWR."
+        data_tests:
+          - not_null
+          - accepted_values:
+              values: ['Manhattan', 'Outer boroughs', 'Unknown / EWR']
+
+      - name: is_airport
+        description: "True if the zone is JFK, LaGuardia, or Newark airport."
+        data_tests:
+          - not_null
+
+      - name: is_manhattan_cbd
+        description: "Approximate flag for Manhattan central business district zones."
+        data_tests:
+          - not_null
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # DIM_DATETIME
+  # ─────────────────────────────────────────────────────────────────────────
+  - name: dim_datetime
+    description: >
+      Calendar dimension generated from the project start date (var start_date)
+      through current_date. Grain: one row per calendar date.
+
+    columns:
+
+      - name: date_day
+        description: "Calendar date. Primary key."
+        data_tests:
+          - not_null
+          - unique
+
+      - name: year
+        description: "4-digit calendar year."
+        data_tests:
+          - not_null
+
+      - name: month
+        description: "Calendar month (1–12)."
+        data_tests:
+          - not_null
+          - accepted_values:
+              values: [1,2,3,4,5,6,7,8,9,10,11,12]
+
+      - name: day_of_week
+        description: "Day of week (1=Sunday, 7=Saturday)."
+        data_tests:
+          - not_null
+          - accepted_values:
+              values: [1,2,3,4,5,6,7]
+
+      - name: quarter
+        description: "Calendar quarter (1–4)."
+        data_tests:
+          - not_null
+          - accepted_values:
+              values: [1,2,3,4]
+
+      - name: is_weekend
+        description: "True for Saturday and Sunday."
+        data_tests:
+          - not_null
+
+      - name: is_us_holiday
+        description: "True for fixed-date US federal holidays."
+        data_tests:
+          - not_null
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # MART_HOURLY_KPI
+  # ─────────────────────────────────────────────────────────────────────────
+  - name: mart_hourly_kpi
+    description: >
+      Pre-aggregated OBT at (pickup_date, pickup_hour, cab_type, borough_group)
+      grain. Powers all Superset dashboard charts. Incrementally updated daily.
+
+    columns:
+
+      - name: pickup_date
+        description: "Calendar date of pickup. Partition column."
+        data_tests:
+          - not_null
+
+      - name: pickup_hour
+        description: "Hour of day (0–23)."
+        data_tests:
+          - not_null
+          - accepted_values:
+              values: [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23]
+
+      - name: cab_type
+        description: "yellow or green."
+        data_tests:
+          - not_null
+          - accepted_values:
+              values: ['yellow', 'green']
+
+      - name: borough_group
+        description: "Simplified borough grouping from dim_location."
+        data_tests:
+          - not_null
+
+      - name: trip_count
+        description: "Number of trips in this bucket."
+        data_tests:
+          - not_null
+
+      - name: total_revenue
+        description: "Sum of total_amount for all trips in this bucket."
+        data_tests:
+          - not_null
+
+      - name: avg_revenue_per_trip
+        description: "Mean total_amount per trip."
+
+      - name: avg_tip_pct
+        description: "Mean tip as a percentage of fare, for trips where fare > 0."
+
+      - name: avg_speed_mph
+        description: "Mean average speed in mph across all trips in this bucket."
+
+      - name: avg_duration_minutes
+        description: "Mean trip duration in minutes."
+
+      - name: median_duration_minutes
+        description: "Approximate median trip duration (approx_percentile p50) in minutes."
+
+      - name: credit_card_trips
+        description: "Count of trips paid by credit card."
+
+      - name: cash_trips
+        description: "Count of trips paid in cash."
+
+      - name: is_weekend
+        description: "True if pickup_date falls on a weekend."
+        data_tests:
+          - not_null
+
+      - name: is_us_holiday
+        description: "True if pickup_date is a fixed US federal holiday."
+        data_tests:
+          - not_null

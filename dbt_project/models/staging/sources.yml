@@ -1,0 +1,48 @@
+# models/staging/sources.yml
+# ─────────────────────────────────────────────────────────────────────────────
+# Declares the Glue catalog tables written by the Spark silver job as dbt
+# sources.  This lets staging models reference them with {{ source() }} and
+# enables source freshness checks (`dbt source freshness`).
+# ─────────────────────────────────────────────────────────────────────────────
+
+version: 2
+
+sources:
+  - name: silver
+    description: >
+      Cleansed and deduplicated TLC parquet tables written by job1_cleanse.py
+      into the silver S3 zone and registered in the Glue catalog under
+      nyc_tlc_silver.
+    database: AwsDataCatalog
+    schema: nyc_tlc_silver
+
+    freshness:
+      warn_after:  { count: 25, period: hour }
+      error_after: { count: 49, period: hour }   # daily pipeline → alert if >2 runs missed
+
+    loaded_at_field: pickup_at   # Athena reads this from the Parquet metadata
+
+    tables:
+      - name: yellow
+        description: "Yellow taxi trips, partitioned by pickup_date"
+        columns:
+          - name: tpep_pickup_datetime
+            description: "Trip pickup timestamp (raw from TLC)"
+          - name: tpep_dropoff_datetime
+            description: "Trip dropoff timestamp (raw from TLC)"
+          - name: pulocationid
+            description: "Pickup taxi zone ID (1–263)"
+          - name: dolocationid
+            description: "Dropoff taxi zone ID (1–263)"
+
+      - name: green
+        description: "Green taxi trips, partitioned by pickup_date"
+        columns:
+          - name: lpep_pickup_datetime
+            description: "Trip pickup timestamp (raw from TLC)"
+          - name: lpep_dropoff_datetime
+            description: "Trip dropoff timestamp (raw from TLC)"
+          - name: pulocationid
+            description: "Pickup taxi zone ID (1–263)"
+          - name: dolocationid
+            description: "Dropoff taxi zone ID (1–263)"
