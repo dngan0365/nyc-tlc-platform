@@ -101,58 +101,110 @@ services:
   # Superset
   # ────────────────────────────────────────────────────────────────────────────
   superset:
-    image: apache/superset:3.1.0
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.superset
+
     env_file:
       - ../.env
+      - ../.env.generated
+
+    environment:
+      SUPERSET_SECRET_KEY: "super-secret-key-change-this"
+      PYTHONPATH: /app/pythonpath
+
     ports:
       - "8088:8088"
+
     volumes:
       - superset_data:/app/superset_home
+      - ./superset_config.py:/app/pythonpath/superset_config.py
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+    command:
+      - /bin/sh
+      - -c
+      - |
+        superset db upgrade &&
+        superset fab create-admin \
+          --username admin \
+          --firstname Superset \
+          --lastname Admin \
+          --email admin@example.com \
+          --password admin || true &&
+        superset init &&
+        /usr/bin/run-server.sh
+
     healthcheck:
       test: ["CMD", "curl", "--fail", "http://localhost:8088/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 60s
+
     restart: unless-stopped
+ 
+  # ────────────────────────────────────────────────────────────────────────────
+  # Superset — chart/dashboard bootstrap (runs once, then exits)
+  # Waits for Superset to be healthy, then calls the REST API to create all
+  # datasets, charts, and the dashboard automatically. No manual command needed.
+  # ────────────────────────────────────────────────────────────────────────────
+  superset-init:
+    build:
+      context: ..                             # repo root
+      dockerfile: infra/Dockerfile.superset-init
+    env_file:
+      - ../.env
+      - ../.env.generated
+    environment:
+      SUPERSET_URL: "http://superset:8088"    # service name, not localhost
+      SUPERSET_USER: "${SUPERSET_USER:-admin}"
+      SUPERSET_PASS: "${SUPERSET_PASS:-admin}"
+      SUPERSET_DB_NAME: "${SUPERSET_DB_NAME:-Athena TLC}"
+      SUPERSET_SCHEMA: "${SUPERSET_SCHEMA:-marts}"
+      SUPERSET_WAIT_TIMEOUT: "120"            # seconds to wait for /health
+    depends_on:
+      superset:
+        condition: service_healthy            # only starts after Superset is up
+    restart: "no"                             # one-shot — exits after bootstrap
 
   # ────────────────────────────────────────────────────────────────────────────
   # Optional services (uncomment as needed)
   # ────────────────────────────────────────────────────────────────────────────
 
-  # mlflow:
-  #   image: ghcr.io/mlflow/mlflow:v2.13.0
-  #   ports:
-  #     - "5000:5000"
-  #   command: >
-  #     mlflow server
-  #     --host 0.0.0.0
-  #     --backend-store-uri sqlite:///mlflow.db
-  #   restart: unless-stopped
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:v2.13.0
+    ports:
+      - "5001:5000"
+    command: >
+      mlflow server
+      --host 0.0.0.0
+      --backend-store-uri sqlite:///mlflow.db
+    restart: unless-stopped
 
-  # rag-api:
-  #   build:
-  #     context: ../serving/rag_app
-  #   env_file:
-  #     - ../.env
-  #     - ../.env.generated
-  #   ports:
-  #     - "8000:8000"
-  #   depends_on:
-  #     - mlflow
-  #   restart: unless-stopped
-
-  # localstack:
-  #   image: localstack/localstack:3.4
-  #   ports:
-  #     - "4566:4566"
-  #   environment:
-  #     SERVICES: s3,athena,glue
-  #   volumes:
-  #     - localstack_data:/var/lib/localstack
-  #   restart: unless-stopped
+  rag-app:
+    build:
+      context: ../serving/rag_app
+      dockerfile: Dockerfile
+    env_file:
+      - ../.env
+      - ../.env.generated
+    ports:
+      - "8501:8501"
+    volumes:
+      - ../serving/rag_app:/app
+    command: >
+      streamlit run streamlit_app.py
+      --server.port=8501
+      --server.address=0.0.0.0
+    depends_on:
+      - mlflow
+    restart: unless-stopped
 
 volumes:
   postgres_data:
   superset_data:
   airflow_logs:          # ← added; persists logs across restarts
-  # localstack_data:     # ← uncomment if you enable localstack

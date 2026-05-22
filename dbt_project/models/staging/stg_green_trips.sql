@@ -1,7 +1,7 @@
 -- models/staging/stg_green_trips.sql
 -- ─────────────────────────────────────────────────────────────────────────────
 -- Thin view over the silver-zone green taxi table.
--- Green trips use lpep_* timestamp columns and have no airport_fee field.
+-- Green trips use * timestamp columns and have no airport_fee field.
 -- All column names are normalised to match stg_yellow_trips so the
 -- intermediate union model can combine them without CASE expressions.
 --
@@ -28,17 +28,17 @@ select
     cast(passenger_count   as integer)          as passenger_count,
 
     -- ── Timestamps ───────────────────────────────────────────────────────────
-    cast(lpep_pickup_datetime  as timestamp)    as pickup_at,
-    cast(lpep_dropoff_datetime as timestamp)    as dropoff_at,
-    date(lpep_pickup_datetime)                  as pickup_date,
-    hour(cast(lpep_pickup_datetime as timestamp)) as pickup_hour,
+    cast(pickup_datetime  as timestamp)    as pickup_at,
+    cast(dropoff_datetime as timestamp)    as dropoff_at,
+    cast(pickup_datetime  as date)         as pickup_date,
+    extract(hour from cast(pickup_datetime as timestamp)) as pickup_hour,
 
     -- ── Distance & duration ──────────────────────────────────────────────────
     cast(trip_distance     as double)           as trip_distance_miles,
     date_diff(
         'second',
-        cast(lpep_pickup_datetime  as timestamp),
-        cast(lpep_dropoff_datetime as timestamp)
+        cast(pickup_datetime  as timestamp),
+        cast(dropoff_datetime as timestamp)
     )                                           as trip_duration_seconds,
 
     -- ── Financials ───────────────────────────────────────────────────────────
@@ -50,7 +50,7 @@ select
     cast(improvement_surcharge as double)       as improvement_surcharge,
     cast(total_amount      as double)           as total_amount,
     cast(congestion_surcharge  as double)       as congestion_surcharge,
-    cast(null as double)                        as airport_fee,   -- not in green dataset
+    CAST(null as double)                        as airport_fee,
 
     -- ── Metadata ─────────────────────────────────────────────────────────────
     'green'                                     as cab_type
@@ -58,7 +58,7 @@ select
 from {{ source('silver', 'green') }}
 
 where
-    lpep_pickup_datetime  is not null
-    and lpep_dropoff_datetime is not null
-    and lpep_pickup_datetime < lpep_dropoff_datetime
-    and cast(total_amount as double) >= 0
+    pickup_datetime  is not null
+    and dropoff_datetime is not null
+    and pickup_datetime < dropoff_datetime
+    and total_amount >= 0

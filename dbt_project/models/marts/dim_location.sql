@@ -48,9 +48,9 @@ enriched as (
 
         -- Is this zone inside one of the major airports?
         case
-            when zone_name like '%JFK%'    then true
-            when zone_name like '%LaGuardia%' then true
-            when zone_name like '%Newark%' then true
+            when lower(zone_name) like '%jfk%'       then true
+            when lower(zone_name) like '%laguardia%'  then true
+            when lower(zone_name) like '%newark%'     then true
             else false
         end                         as is_airport,
 

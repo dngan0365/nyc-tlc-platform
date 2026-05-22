@@ -27,22 +27,41 @@ unioned as (
     select * from yellow
     union all
     select * from green
+),
+
+keyed as (
+    select
+        -- ── Surrogate key ────────────────────────────────────────────────
+        -- Five semantically meaningful fields + a row_number tiebreaker.
+        -- row_number is 1 for all truly unique trips, so it doesn't bloat
+        -- the key for the happy path — it only fires for genuine dupes.
+        to_hex(xxhash64(to_utf8(
+            concat(
+                cast(pickup_at           as varchar), '|',
+                cast(dropoff_at          as varchar), '|',
+                cast(pickup_location_id  as varchar), '|',
+                cast(dropoff_location_id as varchar), '|',
+                cast(fare_amount         as varchar), '|',
+                cab_type,                             '|',
+                cast(
+                    row_number() over (
+                        partition by
+                            pickup_at,
+                            dropoff_at,
+                            pickup_location_id,
+                            dropoff_location_id,
+                            fare_amount,
+                            cab_type
+                        order by
+                            total_amount,   -- secondary: prefer higher-value row
+                            tip_amount      -- tertiary: then higher tip
+                    ) as varchar)
+            )
+        )))                                     as trip_id,
+
+        *
+
+    from unioned
 )
 
-select
-    -- ── Surrogate key ────────────────────────────────────────────────────────
-    -- Deterministic hash so re-runs produce the same key value.
-    -- Athena uses xxhash64; adjust to md5() if your Athena engine version
-    -- doesn't support xxhash64.
-    to_hex(xxhash64(to_utf8(
-        concat(
-            cast(pickup_at            as varchar), '|',
-            cast(pickup_location_id   as varchar), '|',
-            cast(dropoff_location_id  as varchar), '|',
-            cab_type
-        )
-    )))                                         as trip_key,
-
-    *
-
-from unioned
+select * from keyed

@@ -90,3 +90,35 @@ data "aws_iam_policy_document" "glue_catalog_policy" {
 resource "aws_glue_resource_policy" "catalog" {
   policy = data.aws_iam_policy_document.glue_catalog_policy.json
 }
+resource "aws_iam_role_policy" "emr_glue" {
+  name = "emr-glue-policy"
+  role = aws_iam_role.emr_execution.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "glue:GetDatabase",
+          "glue:CreateDatabase",
+          "glue:GetTable",
+          "glue:CreateTable",
+          "glue:UpdateTable",
+          "glue:GetPartitions",
+          "glue:CreatePartition",
+          "glue:BatchCreatePartition",
+        ]
+        Resource = [
+          "arn:aws:glue:${var.aws_region}:${data.aws_caller_identity.current.account_id}:catalog",
+
+          "arn:aws:glue:${var.aws_region}:${data.aws_caller_identity.current.account_id}:database/nyc_tlc_silver",
+          "arn:aws:glue:${var.aws_region}:${data.aws_caller_identity.current.account_id}:table/nyc_tlc_silver/*",
+
+          "arn:aws:glue:${var.aws_region}:${data.aws_caller_identity.current.account_id}:database/nyc_tlc_gold",
+          "arn:aws:glue:${var.aws_region}:${data.aws_caller_identity.current.account_id}:table/nyc_tlc_gold/*"
+        ]
+      }
+    ]
+  })
+}

@@ -9,7 +9,7 @@
 --   predicate window (last 3 days by default, to catch late arrivals).
 -- • Full-refresh (`dbt run --full-refresh`) rebuilds the entire table.
 --
--- Grain: one row per trip (trip_key is the unique identifier).
+-- Grain: one row per trip (trip_id is the unique identifier).
 -- ─────────────────────────────────────────────────────────────────────────────
 
 {{
@@ -54,7 +54,7 @@ rate_codes as (
 enriched as (
     select
         -- ── Keys ─────────────────────────────────────────────────────────────
-        t.trip_key,
+        t.trip_id,
         t.pickup_location_id,
         t.dropoff_location_id,
 

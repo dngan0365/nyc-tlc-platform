@@ -192,7 +192,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--vehicle-types", nargs="+", default=["yellow", "green"],
                         choices=ALL_TYPES, help="Vehicle types to backfill")
-    parser.add_argument("--years", nargs="+", type=int, default=[2022, 2023, 2024, 2025, 2026])
+    parser.add_argument("--years", nargs="+", type=int, default=[2026])
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 

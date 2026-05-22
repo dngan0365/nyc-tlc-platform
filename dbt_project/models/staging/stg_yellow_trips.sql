@@ -27,17 +27,17 @@ select
     cast(passenger_count   as integer)          as passenger_count,
 
     -- ── Timestamps ───────────────────────────────────────────────────────────
-    cast(tpep_pickup_datetime  as timestamp)    as pickup_at,
-    cast(tpep_dropoff_datetime as timestamp)    as dropoff_at,
-    date(tpep_pickup_datetime)                  as pickup_date,    -- partition key
-    hour(cast(tpep_pickup_datetime as timestamp)) as pickup_hour,
+    cast(pickup_datetime  as timestamp)    as pickup_at,
+    cast(dropoff_datetime as timestamp)    as dropoff_at,
+    cast(pickup_datetime  as date)         as pickup_date,    -- partition key
+    extract(hour from cast(pickup_datetime as timestamp)) as pickup_hour,
 
     -- ── Distance & duration ──────────────────────────────────────────────────
     cast(trip_distance     as double)           as trip_distance_miles,
     date_diff(
         'second',
-        cast(tpep_pickup_datetime  as timestamp),
-        cast(tpep_dropoff_datetime as timestamp)
+        cast(pickup_datetime  as timestamp),
+        cast(dropoff_datetime as timestamp)
     )                                           as trip_duration_seconds,
 
     -- ── Financials ───────────────────────────────────────────────────────────
@@ -49,7 +49,7 @@ select
     cast(improvement_surcharge as double)       as improvement_surcharge,
     cast(total_amount      as double)           as total_amount,
     cast(congestion_surcharge  as double)       as congestion_surcharge,
-    cast(airport_fee       as double)           as airport_fee,
+    CAST(null as double)                        as airport_fee,
 
     -- ── Metadata ─────────────────────────────────────────────────────────────
     'yellow'                                    as cab_type
@@ -59,7 +59,7 @@ from {{ source('silver', 'yellow') }}
 where
     -- Basic sanity gates (hard rejects should have been quarantined upstream,
     -- but a second check here is cheap and keeps staging clean)
-    tpep_pickup_datetime  is not null
-    and tpep_dropoff_datetime is not null
-    and tpep_pickup_datetime < tpep_dropoff_datetime
-    and cast(total_amount as double) >= 0
+    pickup_datetime  is not null
+    and dropoff_datetime is not null
+    and pickup_datetime < dropoff_datetime
+    and total_amount >= 0

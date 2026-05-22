@@ -21,10 +21,10 @@ VEHICLE_PREFIX = {
 # Format: (year, month) → set of unavailable types
 _UNAVAILABLE: dict[tuple[int, int], set[str]] = {
     # 2026 — only fhvhv Jan published so far (as of May 2026)
-    (2026, 1):  {"yellow", "green", "fhv"},
-    (2026, 2):  {"yellow", "green", "fhv", "fhvhv"},
-    (2026, 3):  {"yellow", "green", "fhv", "fhvhv"},
-    (2026, 4):  {"yellow", "green", "fhv", "fhvhv"},
+    (2026, 1):  {"fhv"},
+    (2026, 2):  {"fhv", "fhvhv"},
+    (2026, 3):  {"fhv", "fhvhv"},
+    (2026, 4):  {"fhv", "fhvhv"},
     (2026, 5):  {"yellow", "green", "fhv", "fhvhv"},
     (2026, 6):  {"yellow", "green", "fhv", "fhvhv"},
     (2026, 7):  {"yellow", "green", "fhv", "fhvhv"},
@@ -34,7 +34,6 @@ _UNAVAILABLE: dict[tuple[int, int], set[str]] = {
     (2026, 11): {"yellow", "green", "fhv", "fhvhv"},
     (2026, 12): {"yellow", "green", "fhv", "fhvhv"},
     # 2025 Dec — yellow/green not yet published
-    (2025, 12): {"yellow", "green"},
 }
 
 # Columns added from 2025-01 onwards

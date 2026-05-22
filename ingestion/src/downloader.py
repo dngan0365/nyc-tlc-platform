@@ -4,7 +4,6 @@ Downloads TLC parquet files directly from CloudFront and uploads to S3 bronze.
 """
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import boto3

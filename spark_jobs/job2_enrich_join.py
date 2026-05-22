@@ -3,6 +3,41 @@
 """
 Job 2 — Silver → Gold enrichment pipeline.
 Optimized for EMR Serverless + Delta Lake.
+
+FIX (2026-05-20)
+────────────────
+Trước đây register_glue_table() dùng SequenceFileInputFormat + LazySimpleSerDe
++ Columns=[] — đây là Hive stub, Athena KHÔNG đọc được Delta qua cách này.
+
+Athena yêu cầu cùng pattern như silver (job1):
+  1. SymlinkTextInputFormat — Athena đọc manifest để tìm Parquet files.
+  2. Explicit GOLD_FACT_COLUMNS — SymlinkTextInputFormat không tự infer schema.
+  3. Per-partition manifest entries — Athena dùng Location của từng partition
+     để resolve "No path property defined" error.
+  4. GENERATE symlink_format_manifest sau mỗi Delta write — để manifest luôn
+     phản ánh đúng data hiện tại.
+  5. Default region thống nhất về ap-southeast-1 (giống job1).
+
+Errors được fix:
+    TABLE_NOT_FOUND: nyc_tlc_gold.fact_trips
+    Column '<name>' cannot be resolved
+    No path property defined for table: nyc_tlc_gold.fact_trips
+
+FIX (2026-05-22) — 2025-02 schema evolution (mirrors job1)
+───────────────────────────────────────────────────────────
+job1 now writes cbd_congestion_fee and airport_fee (lowercase) into silver.
+job2 reads those silver Delta tables via unionByName, so the gold schema must
+also carry both columns or the write will fail with a Delta AnalysisException.
+
+Two changes fix this:
+  1. cbd_congestion_fee added to GOLD_FACT_COLUMNS (airport_fee was already
+     present; it was just missing from the list — added here for correctness).
+     Older gold partitions will have NULL for cbd_congestion_fee — fine for
+     Delta and Athena.
+  2. The Delta write uses .option("mergeSchema", "true") so the first run
+     carrying the new column extends the gold table schema automatically.
+     overwriteSchema is intentionally NOT set — Delta rejects the combination
+     of replaceWhere + overwriteSchema=true.
 """
 
 from __future__ import annotations
@@ -20,20 +55,20 @@ from pyspark.sql.types import (
     StructType,
 )
 
-# -----------------------------------------------------------------------------
+# ─────────────────────────────────────────────────────────────────────────────
 # Logging
-# -----------------------------------------------------------------------------
+# ─────────────────────────────────────────────────────────────────────────────
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(name)s %(message)s",
 )
-
 log = logging.getLogger(__name__)
 
-# -----------------------------------------------------------------------------
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Schemas
-# -----------------------------------------------------------------------------
+# ─────────────────────────────────────────────────────────────────────────────
 
 ZONE_SCHEMA = StructType([
     StructField("LocationID",    IntegerType(), True),
@@ -57,126 +92,259 @@ PAYMENT_SCHEMA = StructType([
 ])
 
 
-# -----------------------------------------------------------------------------
-# Glue Registration
-# -----------------------------------------------------------------------------
+# ─────────────────────────────────────────────────────────────────────────────
+# Gold schema — fact_trips
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# Athena's SymlinkTextInputFormat yêu cầu explicit column definitions.
+# List này phải khớp CHÍNH XÁC với output của enrich_join():
+#   - tất cả columns từ silver (passthrough)
+#   - derived columns từ enrich step (tip_rate, is_airport_trip, ...)
+#   - dimension columns từ broadcast joins (borough, zone names, payment_type_name)
+#   - pickup_year / pickup_month là PartitionKeys — KHÔNG liệt kê ở đây.
+#
+# Types dùng Hive DDL notation (Glue / Athena standard).
+GOLD_FACT_COLUMNS = [
+    # ── Silver passthrough columns ────────────────────────────────────────────
+    {"Name": "VendorID",              "Type": "bigint"},
+    {"Name": "pickup_datetime",       "Type": "timestamp"},
+    {"Name": "dropoff_datetime",      "Type": "timestamp"},
+    {"Name": "passenger_count",       "Type": "bigint"},
+    {"Name": "trip_distance",         "Type": "double"},
+    {"Name": "RatecodeID",            "Type": "bigint"},
+    {"Name": "store_and_fwd_flag",    "Type": "string"},
+    {"Name": "PULocationID",          "Type": "bigint"},
+    {"Name": "DOLocationID",          "Type": "bigint"},
+    {"Name": "payment_type",          "Type": "bigint"},
+    {"Name": "fare_amount",           "Type": "double"},
+    {"Name": "extra",                 "Type": "double"},
+    {"Name": "mta_tax",               "Type": "double"},
+    {"Name": "tip_amount",            "Type": "double"},
+    {"Name": "tolls_amount",          "Type": "double"},
+    {"Name": "improvement_surcharge", "Type": "double"},
+    {"Name": "total_amount",          "Type": "double"},
+    {"Name": "congestion_surcharge",  "Type": "double"},
+    {"Name": "airport_fee",           "Type": "double"},
+    # FIX (2026-05-22): new TLC surcharge column present from 2025 data onward.
+    # Rows from older gold partitions will be NULL here — fine for Delta / Athena.
+    {"Name": "cbd_congestion_fee",    "Type": "double"},
+    # green-only columns (NULL for yellow rows)
+    {"Name": "ehail_fee",             "Type": "double"},
+    {"Name": "trip_type",             "Type": "bigint"},
+    {"Name": "trip_duration_min",     "Type": "double"},
+    {"Name": "speed_mph",             "Type": "double"},
+    {"Name": "pickup_date",           "Type": "date"},
+    {"Name": "pickup_hour",           "Type": "int"},
+    {"Name": "pickup_dow",            "Type": "int"},
+    {"Name": "vehicle_type",          "Type": "string"},
+    {"Name": "trip_id",               "Type": "string"},
+    # ── Dimension columns từ broadcast joins ──────────────────────────────────
+    {"Name": "pickup_borough",        "Type": "string"},
+    {"Name": "pickup_zone",           "Type": "string"},
+    {"Name": "pickup_service_zone",   "Type": "string"},
+    {"Name": "dropoff_borough",       "Type": "string"},
+    {"Name": "dropoff_zone",          "Type": "string"},
+    {"Name": "payment_type_name",     "Type": "string"},
+    # ── Derived enrichment columns ────────────────────────────────────────────
+    {"Name": "tip_rate",              "Type": "double"},
+    {"Name": "is_airport_trip",       "Type": "boolean"},
+    {"Name": "is_weekend",            "Type": "boolean"},
+    {"Name": "time_of_day",           "Type": "string"},
+    # NOTE: pickup_year và pickup_month là PartitionKeys — không liệt kê ở đây.
+]
 
-def ensure_glue_database(glue_client, database_name: str) -> None:
-    """
-    Create the Glue database if it does not already exist.
-    Safe to call on every job run — does nothing if the DB is already there.
-    """
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Glue helpers
+# ─────────────────────────────────────────────────────────────────────────────
+
+def ensure_glue_database(glue_client, database_name: str, s3_location: str) -> None:
+    """Create the Glue database if it does not already exist."""
     try:
         glue_client.get_database(Name=database_name)
-        log.info(f"[glue] Database '{database_name}' already exists")
+        log.info("[glue] Database '%s' already exists", database_name)
     except glue_client.exceptions.EntityNotFoundException:
         glue_client.create_database(
-            DatabaseInput={"Name": database_name}
+            DatabaseInput={
+                "Name": database_name,
+                "LocationUri": s3_location,
+            }
         )
-        log.info(f"[glue] Created database '{database_name}'")
+        log.info("[glue] Created database '%s'", database_name)
 
 
-def register_glue_table(
+def register_delta_table(
     glue_database: str,
     table_name: str,
     s3_location: str,
     partition_keys: list[str],
-    region: str = "us-east-1",
+    columns: list[dict],
+    region: str,
 ) -> None:
     """
-    Create or update a Glue table pointing at a Delta Lake S3 location.
+    Register a Delta Lake table in Glue dùng SymlinkTextInputFormat,
+    giống hệt pattern của job1 (silver tables).
 
-    Uses EXTERNAL_TABLE with Delta-specific parameters so Athena can query
-    it via the Athena-Delta connector, and so `aws glue get-tables` returns
-    it for dbt source validation.
+    Tại sao SymlinkTextInputFormat thay vì native Delta?
+    ─────────────────────────────────────────────────────
+    Athena không native hiểu _delta_log/. Approach được support:
+      1. Delta write data dạng Parquet dưới table root.
+      2. `GENERATE symlink_format_manifest` → Delta tạo manifest tại
+             <table_root>/_symlink_format_manifest/
+      3. Glue table trỏ vào manifest via SymlinkTextInputFormat.
+      4. Athena đọc files được liệt kê trong manifest.
 
-    Parameters
-    ----------
-    glue_database:  Name of the target Glue database (e.g. 'nyc_tlc_gold').
-    table_name:     Name of the table to create/update (e.g. 'fact_trips').
-    s3_location:    S3 URI of the Delta table root (no trailing slash).
-    partition_keys: List of partition column names.
-    region:         AWS region where Glue lives.
+    Tại sao cần explicit Columns?
+    ──────────────────────────────
+    SymlinkTextInputFormat không thể tự infer schema từ Parquet metadata.
+    Nếu Columns=[], Athena raise "Column '<name>' cannot be resolved".
     """
-
     glue = boto3.client("glue", region_name=region)
+    ensure_glue_database(glue, glue_database, s3_location)
 
-    ensure_glue_database(glue, glue_database)
+    partition_col_defs = [{"Name": pk, "Type": "string"} for pk in partition_keys]
 
-    partition_col_defs = [
-        {"Name": pk, "Type": "string"}
-        for pk in partition_keys
-    ]
+    # Manifest root — Delta tạo per-partition manifests dưới prefix này.
+    manifest_location = f"{s3_location}/_symlink_format_manifest"
 
     table_input = {
         "Name": table_name,
-        "Description": f"Delta Lake table managed by EMR Serverless job2_enrich — {table_name}",
+        "Description": f"Delta Lake table (gold) — {table_name}",
         "TableType": "EXTERNAL_TABLE",
         "Parameters": {
-            "table_type":                 "DELTA",
-            "spark.sql.sources.provider": "delta",
+            "classification": "parquet",
+            "EXTERNAL":       "TRUE",
+            "table_type":     "DELTA",
         },
         "StorageDescriptor": {
-            "Location":     s3_location,
-            "InputFormat":  "org.apache.hadoop.mapred.SequenceFileInputFormat",
-            "OutputFormat": "org.apache.hadoop.hive.ql.io.HiveSequenceFileOutputFormat",
+            # Trỏ vào manifest root, KHÔNG phải table root.
+            "Location":     manifest_location,
+            "InputFormat":  "org.apache.hadoop.hive.ql.io.SymlinkTextInputFormat",
+            "OutputFormat": "org.apache.hadoop.hive.ql.io.HiveIgnoreKeyTextOutputFormat",
             "SerdeInfo": {
-                "SerializationLibrary": "org.apache.hadoop.hive.serde2.lazy.LazySimpleSerDe",
+                "SerializationLibrary": "org.apache.hadoop.hive.ql.io.parquet.serde.ParquetHiveSerDe",
+                "Parameters": {"serialization.format": "1"},
             },
-            "Columns": [],  # Delta reader infers schema from _delta_log at query time
+            # Explicit columns — bắt buộc cho SymlinkTextInputFormat.
+            "Columns": columns,
         },
         "PartitionKeys": partition_col_defs,
     }
 
+    _upsert_glue_table(glue, glue_database, table_input)
+
+
+def _add_gold_partitions(
+    glue_database: str,
+    table_name: str,
+    s3_table_root: str,
+    year: str,
+    month: str,
+    columns: list[dict],
+    region: str,
+) -> None:
+    """
+    Register (pickup_year, pickup_month) partition trong Glue catalog
+    cho gold SymlinkTextInputFormat table.
+
+    Mỗi partition Location phải trỏ vào sub-directory của manifest:
+        <table_root>/_symlink_format_manifest/pickup_year=YYYY/pickup_month=M/
+
+    Nếu không có partition entries, Athena báo:
+        "No path property defined for table: nyc_tlc_gold.<table>"
+    """
+    glue = boto3.client("glue", region_name=region)
+
+    # Delta dùng integer month (không có leading zero).
+    month_int = str(int(month))
+
+    partition_manifest_location = (
+        f"{s3_table_root}/_symlink_format_manifest"
+        f"/pickup_year={year}/pickup_month={month_int}/"
+    )
+
+    partition_input = {
+        "Values": [year, month_int],
+        "StorageDescriptor": {
+            "Location":     partition_manifest_location,
+            "InputFormat":  "org.apache.hadoop.hive.ql.io.SymlinkTextInputFormat",
+            "OutputFormat": "org.apache.hadoop.hive.ql.io.HiveIgnoreKeyTextOutputFormat",
+            "SerdeInfo": {
+                "SerializationLibrary": "org.apache.hadoop.hive.ql.io.parquet.serde.ParquetHiveSerDe",
+                "Parameters": {"serialization.format": "1"},
+            },
+            "Columns": columns,
+        },
+    }
+
     try:
-        glue.create_table(
+        glue.create_partition(
             DatabaseName=glue_database,
-            TableInput=table_input,
+            TableName=table_name,
+            PartitionInput=partition_input,
         )
         log.info(
-            f"[glue] Created table "
-            f"{glue_database}.{table_name} → {s3_location}"
+            "[glue] Added gold partition pickup_year=%s/pickup_month=%s to %s.%s → %s",
+            year, month_int, glue_database, table_name, partition_manifest_location,
         )
-
     except ClientError as exc:
         if exc.response["Error"]["Code"] == "AlreadyExistsException":
-            glue.update_table(
+            glue.update_partition(
                 DatabaseName=glue_database,
-                TableInput=table_input,
+                TableName=table_name,
+                PartitionValueList=[year, month_int],
+                PartitionInput=partition_input,
             )
             log.info(
-                f"[glue] Updated table "
-                f"{glue_database}.{table_name} → {s3_location}"
+                "[glue] Updated gold partition pickup_year=%s/pickup_month=%s in %s.%s",
+                year, month_int, glue_database, table_name,
             )
         else:
             raise
 
 
-# -----------------------------------------------------------------------------
-# Spark
-# -----------------------------------------------------------------------------
+def _upsert_glue_table(glue_client, database: str, table_input: dict) -> None:
+    """Create the Glue table; update it if it already exists."""
+    name = table_input["Name"]
+    try:
+        glue_client.create_table(DatabaseName=database, TableInput=table_input)
+        log.info("[glue] Created  %s.%s", database, name)
+    except ClientError as exc:
+        if exc.response["Error"]["Code"] == "AlreadyExistsException":
+            glue_client.update_table(DatabaseName=database, TableInput=table_input)
+            log.info("[glue] Updated  %s.%s", database, name)
+        else:
+            raise
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Spark Session
+# ─────────────────────────────────────────────────────────────────────────────
 
 def build_spark(app_name: str) -> SparkSession:
+    """
+    Build SparkSession cho EMR Serverless.
 
+    `delta.compatibility.symlinkFormatManifest.enabled` = true → Delta
+    tự generate symlink manifest sau mỗi write, Athena luôn thấy data mới.
+    """
     spark = (
         SparkSession.builder
         .appName(app_name)
 
-        # Delta
-        .config(
-            "spark.sql.extensions",
-            "io.delta.sql.DeltaSparkSessionExtension",
-        )
-        .config(
-            "spark.sql.catalog.spark_catalog",
-            "org.apache.spark.sql.delta.catalog.DeltaCatalog",
-        )
+        # Delta Lake extensions
+        .config("spark.sql.extensions",
+                "io.delta.sql.DeltaSparkSessionExtension")
+        .config("spark.sql.catalog.spark_catalog",
+                "org.apache.spark.sql.delta.catalog.DeltaCatalog")
 
-        # Glue catalog
-        .config(
-            "spark.hadoop.hive.metastore.client.factory.class",
-            "com.amazonaws.glue.catalog.metastore.AWSGlueDataCatalogHiveClientFactory",
-        )
+        # Auto-generate symlink manifest sau mỗi write
+        .config("spark.databricks.delta.properties.defaults"
+                ".compatibility.symlinkFormatManifest.enabled", "true")
+
+        # AWS Glue Catalog
+        .config("spark.hadoop.hive.metastore.client.factory.class",
+                "com.amazonaws.glue.catalog.metastore.AWSGlueDataCatalogHiveClientFactory")
 
         # Performance
         .config("spark.sql.adaptive.enabled", "true")
@@ -191,19 +359,17 @@ def build_spark(app_name: str) -> SparkSession:
         .enableHiveSupport()
         .getOrCreate()
     )
-
     spark.sparkContext.setLogLevel("WARN")
-
     return spark
 
 
-# -----------------------------------------------------------------------------
+# ─────────────────────────────────────────────────────────────────────────────
 # Taxi zones
-# -----------------------------------------------------------------------------
+# ─────────────────────────────────────────────────────────────────────────────
 
 def load_taxi_zones(spark: SparkSession, bucket: str):
     path = f"s3://{bucket}/reference/taxi_zone_lookup.csv"
-    log.info(f"Loading taxi zones from {path}")
+    log.info("Loading taxi zones from %s", path)
     return (
         spark.read
         .schema(ZONE_SCHEMA)
@@ -212,9 +378,9 @@ def load_taxi_zones(spark: SparkSession, bucket: str):
     )
 
 
-# -----------------------------------------------------------------------------
+# ─────────────────────────────────────────────────────────────────────────────
 # Main transform
-# -----------------------------------------------------------------------------
+# ─────────────────────────────────────────────────────────────────────────────
 
 def enrich_join(
     spark: SparkSession,
@@ -248,9 +414,9 @@ def enrich_join(
     )
 
     row_count = df.count()
-    log.info(f"Silver rows for {year}-{month}: {row_count:,}")
+    log.info("Silver rows for %s-%s: %d", year, month, row_count)
 
-    # ---- Load dimensions ----------------------------------------------------
+    # ── Load dimensions ───────────────────────────────────────────────────────
 
     zones = load_taxi_zones(spark=spark, bucket=bucket)
 
@@ -269,7 +435,7 @@ def enrich_join(
         F.col("Zone").alias("dropoff_zone"),
     )
 
-    # ---- Broadcast joins ----------------------------------------------------
+    # ── Broadcast joins ───────────────────────────────────────────────────────
 
     df = (
         df
@@ -278,7 +444,7 @@ def enrich_join(
         .join(F.broadcast(payment_dim), on="payment_type",  how="left")
     )
 
-    # ---- Derived features ---------------------------------------------------
+    # ── Derived features ──────────────────────────────────────────────────────
 
     df = (
         df
@@ -305,11 +471,18 @@ def enrich_join(
         )
     )
 
-    # ---- Repartition before write -------------------------------------------
+    # ── Repartition trước write ───────────────────────────────────────────────
 
     df = df.repartition(8, "pickup_year", "pickup_month")
 
-    # ---- Delta write --------------------------------------------------------
+    # ── Delta write ───────────────────────────────────────────────────────────
+    # FIX (2026-05-22): use mergeSchema=true so that the first run carrying
+    # cbd_congestion_fee (new in 2025 silver data) extends the gold Delta table
+    # schema automatically.  Older gold partitions gain a NULL column; newer
+    # partitions carry the real values.  Safe to leave on permanently.
+    #
+    # overwriteSchema is intentionally NOT set — Delta rejects the combination
+    # of replaceWhere + overwriteSchema=true.
 
     output_path  = f"s3://{bucket}/gold/fact_trips"
     replace_cond = f"pickup_year = {expected_year} AND pickup_month = {expected_month}"
@@ -319,37 +492,63 @@ def enrich_join(
         .format("delta")
         .mode("overwrite")
         .option("replaceWhere", replace_cond)
-        .option("overwriteSchema", "false")
+        .option("mergeSchema", "true")
+        .option("delta.compatibility.symlinkFormatManifest.enabled", "true")
         .partitionBy("pickup_year", "pickup_month")
         .save(output_path)
     )
 
-    log.info(f"Wrote {row_count:,} rows to {output_path}")
+    log.info("Wrote %d rows to %s", row_count, output_path)
 
-    # ---- Register in Glue ---------------------------------------------------
-    # Done AFTER the Delta write so the _delta_log already exists in S3.
+    # ── Explicitly generate symlink manifest ──────────────────────────────────
+    # Đảm bảo Athena luôn thấy data mới nhất, kể cả khi auto-generate chưa kịp.
+    spark.sql(f"""
+        GENERATE symlink_format_manifest
+        FOR TABLE delta.`{output_path}`
+    """)
+    log.info("Generated symlink_format_manifest at %s/_symlink_format_manifest/", output_path)
 
-    register_glue_table(
+    df.unpersist()
+
+    # ── Register table trong Glue ─────────────────────────────────────────────
+    # FIX: dùng SymlinkTextInputFormat + GOLD_FACT_COLUMNS thay vì
+    # SequenceFileInputFormat + Columns=[] (không đọc được bằng Athena).
+    register_delta_table(
         glue_database=glue_database,
         table_name="fact_trips",
         s3_location=output_path,
         partition_keys=["pickup_year", "pickup_month"],
+        columns=GOLD_FACT_COLUMNS,
+        region=aws_region,
+    )
+
+    # ── Register partition trong Glue ─────────────────────────────────────────
+    # FIX: thêm per-partition manifest location để Athena resolve đúng path.
+    _add_gold_partitions(
+        glue_database=glue_database,
+        table_name="fact_trips",
+        s3_table_root=output_path,
+        year=year,
+        month=month,
+        columns=GOLD_FACT_COLUMNS,
         region=aws_region,
     )
 
 
-# -----------------------------------------------------------------------------
+# ─────────────────────────────────────────────────────────────────────────────
 # Main
-# -----------------------------------------------------------------------------
+# ─────────────────────────────────────────────────────────────────────────────
 
 def main() -> None:
-
     parser = argparse.ArgumentParser(description="Silver → Gold enrichment")
     parser.add_argument("--year",          required=True)
     parser.add_argument("--month",         required=True)
     parser.add_argument("--bucket",        required=True)
-    parser.add_argument("--glue-database", default="nyc_tlc_gold", help="Glue DB for gold tables")
-    parser.add_argument("--aws-region",    default="us-east-1")
+    parser.add_argument("--glue-database", default="nyc_tlc_gold")
+    # FIX: thống nhất default region về ap-southeast-1 (giống job1).
+    # Glue là regional — nếu job tạo table ở us-east-1 nhưng query từ
+    # ap-southeast-1 thì Athena sẽ không thấy table.
+    parser.add_argument("--aws-region",    default="ap-southeast-1")
     args = parser.parse_args()
 
     spark = build_spark(f"nyc-tlc-enrich-{args.year}-{args.month}")

@@ -5,3 +5,4 @@ pyarrow==16.1.0
 apache-airflow-providers-amazon==8.24.0
 dbt-core==1.8.3
 dbt-athena-community==1.8.2
+great-expectations>=1.17.2

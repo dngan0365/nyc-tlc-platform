@@ -13,8 +13,8 @@ sources:
       Cleansed and deduplicated TLC parquet tables written by job1_cleanse.py
       into the silver S3 zone and registered in the Glue catalog under
       nyc_tlc_silver.
-    database: AwsDataCatalog
-    schema: nyc_tlc_silver
+    database: AwsDataCatalog   # Athena catalog — always this value
+    schema: nyc_tlc_silver     # Glue database name
 
     freshness:
       warn_after:  { count: 25, period: hour }
@@ -26,9 +26,9 @@ sources:
       - name: yellow
         description: "Yellow taxi trips, partitioned by pickup_date"
         columns:
-          - name: tpep_pickup_datetime
+          - name: pickup_datetime
             description: "Trip pickup timestamp (raw from TLC)"
-          - name: tpep_dropoff_datetime
+          - name: dropoff_datetime
             description: "Trip dropoff timestamp (raw from TLC)"
           - name: pulocationid
             description: "Pickup taxi zone ID (1–263)"
@@ -38,9 +38,9 @@ sources:
       - name: green
         description: "Green taxi trips, partitioned by pickup_date"
         columns:
-          - name: lpep_pickup_datetime
+          - name: pickup_datetime
             description: "Trip pickup timestamp (raw from TLC)"
-          - name: lpep_dropoff_datetime
+          - name: dropoff_datetime
             description: "Trip dropoff timestamp (raw from TLC)"
           - name: pulocationid
             description: "Pickup taxi zone ID (1–263)"

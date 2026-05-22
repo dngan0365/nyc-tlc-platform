@@ -33,7 +33,6 @@ import statistics
 import time
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
-from typing import Any
 
 import httpx
 import mlflow

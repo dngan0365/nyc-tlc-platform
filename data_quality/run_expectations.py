@@ -37,7 +37,6 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-import os
 import sys
 import time
 from datetime import datetime, timezone
@@ -47,7 +46,7 @@ from typing import Any
 import boto3
 import pandas as pd
 import pyathena
-from great_expectations.dataset import PandasDataset
+import great_expectations as gx
 
 # ── Logging ──────────────────────────────────────────────────────────────────
 
@@ -72,7 +71,6 @@ CW_NAMESPACE = "NycTlc/DataQuality"
 # 500 000 rows gives statistical confidence for percentage-based checks
 # while keeping memory and query cost manageable.
 SAMPLE_LIMIT = 500_000
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Argument parsing
@@ -107,26 +105,19 @@ def build_athena_connection(args: argparse.Namespace) -> pyathena.Connection:
 
 
 def fetch_partition(conn: pyathena.Connection, partition: str) -> pd.DataFrame:
-    """
-    Pull a sample of the target pickup_date partition from fact_trips.
-
-    Uses ORDER BY random() so the sample is representative rather than just
-    the first N rows (which in a partitioned Parquet table would all come
-    from the same file).
-    """
     sql = f"""
         SELECT
-            trip_key,
+            trip_id,
             pickup_date,
-            pickup_at,
-            dropoff_at,
-            cab_type,
-            pickup_location_id,
-            dropoff_location_id,
+            pickup_datetime                        AS pickup_at,
+            dropoff_datetime                       AS dropoff_at,
+            vehicle_type                           AS cab_type,
+            pulocationid                           AS pickup_location_id,
+            dolocationid                           AS dropoff_location_id,
             fare_amount,
-            trip_duration_seconds,
+            CAST(trip_duration_min * 60 AS BIGINT) AS trip_duration_seconds,
             total_amount,
-            payment_type,
+            payment_type_name                      AS payment_type,
             passenger_count
         FROM {GOLD_TABLE}
         WHERE pickup_date = DATE '{partition}'
@@ -136,25 +127,24 @@ def fetch_partition(conn: pyathena.Connection, partition: str) -> pd.DataFrame:
     log.info("Fetching partition pickup_date='%s' from Athena (limit %d rows)…",
              partition, SAMPLE_LIMIT)
     t0 = time.monotonic()
-    df = pd.read_sql(sql, conn)
+    cursor = conn.cursor()
+    cursor.execute(sql)
+    rows = cursor.fetchall()
+    cols = [d[0] for d in cursor.description]
+    df   = pd.DataFrame(rows, columns=cols)
     elapsed = time.monotonic() - t0
     log.info("Fetched %d rows in %.1fs", len(df), elapsed)
     return df
 
-
 def get_exact_row_count(conn: pyathena.Connection, partition: str) -> int:
-    """
-    COUNT(*) for the partition — used by the row-count expectation.
-    We don't use len(df) because the DataFrame is sampled.
-    """
     sql = f"""
         SELECT COUNT(*) AS cnt
         FROM {GOLD_TABLE}
         WHERE pickup_date = DATE '{partition}'
     """
-    result = pd.read_sql(sql, conn)
-    return int(result["cnt"].iloc[0])
-
+    cursor = conn.cursor()
+    cursor.execute(sql)
+    return cursor.fetchone()[0]
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Expectation suite loader
@@ -180,7 +170,17 @@ def run_suite(
     Returns a list of result dicts, one per expectation, with keys:
         check_id, expectation_type, severity, success, result, meta
     """
-    dataset = PandasDataset(df)
+    # ── GX 1.x way to get a validator from a DataFrame ──────────────
+    context = gx.get_context(mode="ephemeral")
+
+    data_source = context.data_sources.add_pandas(name="pandas_ds")
+    data_asset  = data_source.add_dataframe_asset(name="partition_df")
+    batch_def   = data_asset.add_batch_definition_whole_dataframe("batch")
+    batch       = batch_def.get_batch(batch_parameters={"dataframe": df})
+
+    suite_obj   = context.suites.add(gx.ExpectationSuite(name="nyc_tlc_gold_suite"))
+    validator   = context.get_validator(batch=batch, expectation_suite=suite_obj)
+
     results = []
 
     for exp in suite["expectations"]:
@@ -192,36 +192,44 @@ def run_suite(
 
         log.info("Running %s (%s, %s)…", check_id, exp_type, severity)
 
-        # ── Row count check is special: use the exact COUNT(*) value ─────────
+        # ── Special case: row count ─────────────────────────────
         if exp_type == "expect_table_row_count_to_be_between":
             success = kwargs["min_value"] <= exact_row_count <= kwargs["max_value"]
+
             result_dict = {
                 "observed_value": exact_row_count,
                 "expected_min": kwargs["min_value"],
                 "expected_max": kwargs["max_value"],
             }
 
-        # ── All other checks go through PandasDataset ─────────────────────
+        # ── Normal expectations (GX 1.x style) ──────────────────
         else:
-            ge_method = getattr(dataset, exp_type, None)
+            ge_method = getattr(validator, exp_type, None)
+
             if ge_method is None:
                 log.warning("Unknown expectation type '%s' — skipping", exp_type)
                 continue
 
-            ge_result  = ge_method(**kwargs, result_format="SUMMARY")
-            success    = ge_result["success"]
-            result_dict = ge_result.get("result", {})
+            ge_result = ge_method(**kwargs)
+
+            success = ge_result.success
+
+            result_dict = {
+                "unexpected_count": getattr(ge_result.result, "unexpected_count", None),
+                "unexpected_percent": getattr(ge_result.result, "unexpected_percent", None),
+                "details": str(ge_result.result),
+            }
 
         status = "✓ PASS" if success else ("✗ FAIL" if severity == "CRITICAL" else "⚠ WARN")
         log.info("%s  %s", status, check_id)
 
         results.append({
-            "check_id":        check_id,
+            "check_id": check_id,
             "expectation_type": exp_type,
-            "severity":         severity,
-            "success":          success,
-            "result":           result_dict,
-            "meta":             meta,
+            "severity": severity,
+            "success": success,
+            "result": result_dict,
+            "meta": meta,
         })
 
     return results

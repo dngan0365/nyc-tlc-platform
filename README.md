@@ -1,24 +1,10 @@
-```sh
-aws config
-aws sts get-caller-identity
-cd infra/terraform
-terraform init
-terraform plan -out=tfplan
-terraform fmt
-terraform validate
-terraform apply tfplan
-terraform output -json > 'outputs.json
-make upload-spark-jobs
-```
 # 🚕 NYC TLC Data Platform
 
 > A production-grade, end-to-end data platform built on the NYC Taxi & Limousine Commission dataset.
 > Ingests 100M+ trip records per year, processes through a distributed lakehouse pipeline, and serves
-> both a BI dashboard and an AI-powered RAG application.
+> a BI dashboard.
 
-![CI](https://github.com/yourname/nyc-tlc-platform/actions/workflows/ci.yml/badge.svg)
 ![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)
-![Python 3.11](https://img.shields.io/badge/Python-3.11-blue)
 ![EMR Serverless](https://img.shields.io/badge/AWS-EMR%20Serverless-orange)
 ![Delta Lake](https://img.shields.io/badge/Storage-Delta%20Lake-blue)
 
@@ -48,12 +34,8 @@ make upload-spark-jobs
 
 ## Overview
 
-This project demonstrates a **compact, production-quality data platform** that ingests real NYC taxi
-trip data, processes it through a multi-zone lakehouse using AWS EMR Serverless + PySpark, models it
-with dbt, and serves it via two layers:
+This project demonstrates a **compact, production-quality data platform** that ingests real NYC taxi trip data, processes it through a multi-zone lakehouse using AWS EMR Serverless + PySpark, models it with dbt, and serves it via  **Track A — Dashboard** (Apache Superset with time-series drill-down charts)
 
-- **Track A — Dashboard**: Apache Superset with time-series drill-down charts
-- **Track B — AI App**: LangChain RAG API (FastAPI) with MLflow experiment tracking
 
 ### What this platform answers
 
@@ -63,70 +45,14 @@ with dbt, and serves it via two layers:
 | How does demand change across weekday vs weekend? | Superset bar chart with DOW dimension |
 | What is the 7-day rolling trend of trip volume per borough? | Superset line chart |
 | What is the average fare for airport trips vs non-airport? | Superset comparison chart |
-| Natural language: "Which borough has the highest average fare on weekday mornings?" | RAG API `/ask` |
+<!-- | Natural language: "Which borough has the highest average fare on weekday mornings?" | RAG API `/ask` | -->
 
 ---
 
 ## Architecture
+![Architecture](./docs/assets/architecture.png)
 
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│                          DATA SOURCES                               │
-│         NYC TLC Public Registry (registry.opendata.aws)             │
-│         Yellow Taxi · Green Taxi · Taxi Zone Lookup                 │
-│         ~50 GB/year · 100M+ records · Parquet format               │
-└──────────────────────────┬──────────────────────────────────────────┘
-                           │ HTTP download (monthly)
-                           ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│                   INGESTION  (Airflow DAG)                          │
-│  downloader.py → schema_validator.py → uploader.py                 │
-│  Handles: dedup · schema violations · quarantine · late data        │
-└──────────────────────────┬──────────────────────────────────────────┘
-                           │ s3://bucket/bronze/
-                           ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│              S3 LAKEHOUSE  (Delta Lake / Parquet)                   │
-│  Bronze  →  Silver  →  Gold                                         │
-│  raw         cleaned       enriched + aggregated                    │
-│  partition: year/month     partition: pickup_date                   │
-└──────────────────────────┬──────────────────────────────────────────┘
-                           │
-                           ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│           DISTRIBUTED ENGINE  (AWS EMR Serverless · PySpark)        │
-│  Job 1: Cleanse      Bronze → Silver                                │
-│  Job 2: Enrich+Join  Silver → Gold  (Trips ⋈ Zones ⋈ Payment)     │
-│  Job 3: Aggregations Gold   → Gold/KPIs  (window functions)        │
-└──────────────────────────┬──────────────────────────────────────────┘
-                           │
-                           ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│                  DATA MODELING  (dbt · Star Schema)                 │
-│  fact_trips · dim_location · dim_datetime · mart_hourly_kpi         │
-│  Incremental materialization · dbt tests built-in                   │
-└──────────────────────────┬──────────────────────────────────────────┘
-                           │
-                           ▼
-┌──────────────────────────────────────────────────────────────────────┐
-│                   ORCHESTRATION + OBSERVABILITY                      │
-│  Airflow 2.9  ·  Idempotent DAG  ·  Retry policy                   │
-│  Structured logging (structlog)  ·  MLflow experiment tracking      │
-│  Metrics: job_duration · records_processed · data_freshness         │
-└──────────────────────────┬───────────────────────────────────────────┘
-                           │
-              ┌────────────┴────────────┐
-              ▼                         ▼
-┌─────────────────────┐     ┌───────────────────────────┐
-│  Track A · Superset │     │  Track B · LangChain RAG  │
-│  3+ charts          │     │  FastAPI /ask endpoint     │
-│  Time-series        │     │  MLflow eval harness       │
-│  Drill-down         │     │  5 test cases              │
-└─────────────────────┘     └───────────────────────────┘
-```
-
-All services run locally via **docker-compose**. AWS infrastructure (EMR Serverless, S3, Glue, Athena)
-is provisioned via **Terraform**.
+All services run locally via **docker-compose**. AWS infrastructure (EMR Serverless, S3, Glue, Athena) is provisioned via **Terraform**.
 
 ---
 
@@ -143,29 +69,28 @@ is provisioned via **Terraform**.
 | **Modeling** | dbt Core + dbt-athena | SQL-native transforms, built-in tests, lineage |
 | **Data Quality** | Great Expectations 0.18 | 7 checks, quarantine behavior |
 | **Dashboard** | Apache Superset 3.1 | Open-source, connects to Athena natively |
-| **AI App** | LangChain + FastAPI | RAG on trip data, OpenAI GPT-4o-mini |
-| **Experiment Tracking** | MLflow 2.13 | Track RAG eval runs, latency, quality scores |
 | **IaC** | Terraform 1.8 | Reproducible AWS infra |
 | **Containerization** | Docker Compose | Full local stack in one command |
 | **CI/CD** | GitHub Actions | Lint + test + build on every push |
 | **Linting** | ruff + black | Fast, opinionated, zero-config |
 | **Logging** | structlog | Structured JSON logs, not bare prints |
+<!-- | **AI App** | LangChain + FastAPI | RAG on trip data, OpenAI GPT-4o-mini | -->
+<!-- | **Experiment Tracking** | MLflow 2.13 | Track RAG eval runs, latency, quality scores | -->
 
 ---
 
 ## Dataset
 
-**Source**: [NYC TLC Trip Record Data](https://www.nyc.gov/site/tlc/about/tlc-trip-record-data.page)
-hosted on AWS Open Data Registry (`registry.opendata.aws`).
+**Source**: [NYC TLC Trip Record Data](https://www.nyc.gov/site/tlc/about/tlc-trip-record-data.page) hosted on AWS Open Data Registry (`registry.opendata.aws`).
 
 | Property | Value |
 |---|---|
 | Vehicle types | Yellow Taxi, Green Taxi |
-| Time range | January 2023 – present |
+| Time range | January 2022 – April 2026 |
 | Raw size | ~50 GB/year (~4 GB/month) |
 | Record count | ~100M trips/year |
 | Format | Parquet |
-| Update cadence | Monthly (released ~5th of following month) |
+| Update cadence | Monthly (released ~10th of following month) |
 
 ### Entities (joinable tables)
 
@@ -198,6 +123,7 @@ nyc-tlc-platform/
 │       ├── emr_serverless.tf       # EMR Serverless application + IAM roles
 │       ├── glue.tf                 # Glue Data Catalog databases
 │       ├── athena.tf               # Athena workgroup + result bucket
+│       ├── networking.tf           # Configure network
 │       ├── variables.tf
 │       └── outputs.tf              # application_id, role_arn, bucket_name
 │
@@ -207,9 +133,10 @@ nyc-tlc-platform/
 │   ├── operators/
 │   │   └── emr_serverless_operator.py  # Custom Airflow operator (submit + poll)
 │   └── src/
-│       ├── downloader.py           # Download TLC parquet files
-│       ├── schema_validator.py     # Validate schema, quarantine bad files
-│       └── uploader.py             # Upload to S3 bronze zone
+│   │   ├── downloader.py           # Download TLC parquet files
+│   │   ├── schema_validator.py     # Validate schema, quarantine bad files
+│   │   └── uploader.py             # Upload to S3 bronze zone
+│   └── bootstrap/
 │
 ├── spark_jobs/
 │   ├── job1_cleanse.py             # Bronze → Silver: cleanse + dedup + derive
@@ -238,13 +165,8 @@ nyc-tlc-platform/
 │
 ├── serving/
 │   ├── superset/
-│   │   ├── dashboard_export.json   # Import-ready Superset dashboard
-│   │   └── charts/                 # Individual chart configs
-│   └── rag_app/
-│       ├── app.py                  # FastAPI application
-│       ├── rag_chain.py            # LangChain RAG chain + Athena retriever
-│       ├── eval_harness.py         # 5 test cases + MLflow tracking
-│       └── Dockerfile
+│       ├── dashboard_export.json   # Import-ready Superset dashboard
+│       └── build_charts.py        # Individual chart configs
 │
 ├── tests/
 │   ├── unit/
@@ -253,9 +175,8 @@ nyc-tlc-platform/
 │       └── test_pipeline_e2e.py    # End-to-end pipeline on sample data
 │
 ├── docs/
-│   ├── design_doc.md               # Architecture decisions + trade-offs (3 pages)
-│   ├── data_dictionary.md          # Column-level documentation for all final tables
-│   └── runbook.md                  # Failure modes + recovery steps
+│   ├── assets/
+│   └── nyc_tlc_schema_reference.pdf # Schema Docs
 │
 ├── .env.example                    # Environment variable template (no real secrets)
 ├── pyproject.toml                  # Dependencies + ruff + black config
@@ -305,41 +226,35 @@ TLC_S3_BUCKET=
 AIRFLOW_FERNET_KEY=
 
 SUPERSET_SECRET_KEY=change-me-in-production
-OPENAI_API_KEY=sk-...
 ```
 
 ---
 
 ### Step 2 — Provision AWS infrastructure with Terraform
-
+aws sts get-caller-identity
+cd infra/terraform
+terraform init
+terraform plan -out=tfplan
+terraform fmt
+terraform validate
+terraform apply tfplan
+terraform output -json > 'outputs.json
+make upload-spark-jobs
 ```bash
+aws config
+aws sts get-caller-identity # Check identity
 cd infra/terraform
 
 # Initialize providers
 terraform init
 
 # Preview what will be created
-terraform plan \
-  -var="vpc_id=vpc-xxxxxxxxx" \
-  -var='private_subnet_ids=["subnet-xxxxxxxx","subnet-yyyyyyyy"]'
-
-# Apply (creates S3 buckets, EMR Serverless app, IAM roles, Glue catalog)
-terraform apply \
-  -var="vpc_id=vpc-xxxxxxxxx" \
-  -var='private_subnet_ids=["subnet-xxxxxxxx","subnet-yyyyyyyy"]'
+terraform plan -out=tfplan
+terraform apply 
+# Apply (creates S3 buckets, EMR Serverless app, IAM roles, Glue catalog, Athena)
+terraform output -json > 'generated/outputs.json'
+python infra/terraform/scripts/generate_env.py # Add subnets, arn,... to env.generated
 ```
-
-Copy the Terraform outputs into your `.env`:
-
-```bash
-terraform output emr_application_id    # → EMR_APPLICATION_ID
-terraform output emr_execution_role_arn # → EMR_EXECUTION_ROLE_ARN
-terraform output datalake_bucket        # → TLC_S3_BUCKET
-```
-
-> **No VPC?** Run `terraform apply -var="create_vpc=true"` — the config will create a VPC with
-> private subnets and a VPC endpoint for S3 automatically.
-
 ---
 
 ### Step 3 — Upload Spark scripts to S3
@@ -369,10 +284,9 @@ Wait ~60 seconds for all services to be healthy, then open:
 
 | Service | URL | Default credentials |
 |---|---|---|
-| Airflow | http://localhost:8080 | `airflow` / `airflow` |
+| Airflow | http://localhost:8080 | `admin` / `admin` |
 | Superset | http://localhost:8088 | `admin` / `admin` |
-| MLflow | http://localhost:5000 | — |
-| RAG API docs | http://localhost:8000/docs | — |
+
 
 ---
 
@@ -383,25 +297,17 @@ Wait ~60 seconds for all services to be healthy, then open:
 1. Open http://localhost:8080
 2. Find the DAG `nyc_tlc_monthly_pipeline`
 3. Toggle it **ON**
-4. Click **Trigger DAG** → set `execution_date` to `2023-01-01`
-5. Watch the task graph: `upload_scripts → ingest_yellow + ingest_green → emr_cleanse → emr_enrich → emr_aggregate → dbt_run → dq_checks`
-
+4. Click **Trigger DAG** → set `execution_date` to `YYYY-MM` (2026-04)
+5. Watch the task graph: `resolve_year_month + upload_scripts → ingest_yellow + ingest_green → emr_cleanse → emr_enrich → emr_aggregate → dbt_run → dq_checks`
+![Airflow](./docs/assets/airflow.png)
 **Option B — CLI (backfill all of 2023):**
 
 ```bash
 docker exec -it airflow-scheduler \
   airflow dags backfill nyc_tlc_monthly_pipeline \
-    --start-date 2023-01-01 \
-    --end-date   2023-12-01 \
+    --start-date 2022-01-01 \
+    --end-date   2026-04-01 \
     --reset-dagruns
-```
-
-**Option C — Test RAG API immediately (without running full pipeline):**
-
-```bash
-curl -X POST http://localhost:8000/ask \
-  -H "Content-Type: application/json" \
-  -d '{"question": "Which borough has the highest average fare?"}'
 ```
 
 ---
@@ -467,23 +373,28 @@ Auto-stop: idle for 15 minutes → release pre-initialized capacity
 ### Airflow DAG — `nyc_tlc_monthly_pipeline`
 
 ```
-upload_spark_scripts
-        │
-   ┌────┴────┐
-   ▼         ▼
-ingest_   ingest_          (parallel — yellow and green)
-yellow    green
-   └────┬────┘
-        ▼
-   emr_cleanse             (Job 1: Bronze → Silver)
-        ▼
-   emr_enrich_join         (Job 2: Silver → Gold)
-        ▼
-   emr_aggregate           (Job 3: Gold → Gold/KPIs)
-        ▼
-   dbt_run_and_test        (dbt run + dbt test)
-        ▼
-   great_expectations      (7 DQ checks)
+upload_spark_scripts      resolve_year_month
+       └────────────┬──────────────┘
+                    │
+               ┌────┴────┐
+               ▼         ▼
+            ingest_   ingest_          (parallel — yellow and green)
+            yellow    green
+               └────┬────┘
+                    ▼
+               emr_cleanse             (Job 1: Bronze → Silver)
+                    │
+                    ▼
+               emr_enrich_join         (Job 2: Silver → Gold)
+                    │
+                    ▼
+               emr_aggregate           (Job 3: Gold → Gold/KPIs)
+                    │
+                    ▼
+               dbt_run_and_test        (dbt run + dbt test)
+                    │
+                    ▼
+               great_expectations      (7 DQ checks)
 ```
 
 **Idempotency guarantees:**
@@ -519,29 +430,32 @@ Reads raw Parquet from bronze, applies business rules, writes Delta Lake to silv
 4. Derive: `trip_duration_min`, `speed_mph`, `pickup_date`, `pickup_hour`, `pickup_dow`, `vehicle_type`
 5. Generate `trip_id`: `SHA-256(VendorID|pickup_datetime|PULocationID|DOLocationID)`
 6. Deduplicate on `trip_id`
-
-**Output partition key:** `pickup_date` (daily)
-**Justification:** Daily partitions balance file count vs partition pruning efficiency.
-Monthly partitions are too coarse for date-range queries; hourly (8,760 folders/year)
-creates excessive metadata overhead for S3 list operations.
-
+7. Enforce stable schema/types to maintain consistency across TLC dataset versions.
+8. Handle schema evolution (2025 TLC changes):Rename Airport_fee → airport_fe, Add cbd_congestion_fee column,Use mergeSchema=true for automatic Delta schema evolution.
+9. Output format: Delta Lake (Silver layer) with automatic Symlink Manifest generation for Athena compatibility.
+10.  Output partition key: pickup_year, pickup_month (monthly partitioning, as implemented in the code).
+**Justification:** Monthly partitions provide a balance between query pruning efficiency and S3/Athena metadata overhead.
 ---
 
 ### Job 2 — Enrich + Join (Silver → Gold)
-
-Broadcasts the 263-row taxi zone lookup (no shuffle) and joins payment type dimension.
-
+1. Load and combine Silver datasets using unionByName() for yellow and green taxi trips.
+2. Filter target partition by pickup_year and pickup_month.
+3. Broadcasts the 263-row taxi zone lookup (no shuffle) and joins payment type dimension.
 **Joins:**
 - `fact_trips ⋈ taxi_zone_lookup` on `PULocationID` → `pickup_borough`, `pickup_zone`, `pickup_service_zone`
 - `fact_trips ⋈ taxi_zone_lookup` on `DOLocationID` → `dropoff_borough`, `dropoff_zone`
 - `fact_trips ⋈ payment_dim` on `payment_type` → `payment_type_name`
-
+4. Derive enrichment features:
 **Derived:**
 - `tip_rate = tip_amount / fare_amount`
 - `is_airport_trip = pickup_service_zone IN ('Airports', 'EWR')`
 - `is_weekend = pickup_dow IN (1, 7)`
 - `time_of_day`: morning_rush / midday / evening_rush / night / late_night
-
+5. Optimize write performance: Use broadcast joins for small dimensions,repartition(8, pickup_year, pickup_month) before writing.
+6. Handle schema evolution (2025 TLC changes): Support airport_fee and cbd_congestion_fee, Use mergeSchema=true for automatic Delta schema updates.
+7. Output format: Delta Lake (Gold layer) with automatic Symlink Manifest generation for Athena compatibility.
+8. Glue/Athena registration
+9. Output partition key: pickup_year, pickup_month (monthly partitioning).
 ---
 
 ### Job 3 — Aggregations (Gold → Gold/KPIs)
@@ -706,15 +620,16 @@ Connect Superset to Athena:
 |---|---|---|
 | Trip volume by borough over time | Time-series line (drill-down by vehicle_type) | When and where is demand highest? |
 | Average fare heatmap by hour × day | Heatmap (hour of day vs day of week) | When are fares most expensive? |
-| Revenue vs rolling 7-day average | Dual-axis time series | Is this week above or below trend? |
-| Airport vs non-airport trip share | Stacked bar by month | How significant is airport traffic? |
+| Payment Type Breakdown | Pie Chart | What is the popular payment method? |
 
 > All Superset queries run on **Athena** — not local cache. Partition pruning by `pickup_date`
 > keeps query cost under $0.01 per chart render.
 
+![Superset](docs/assets/nyc-taxi-analytics-dashboard.jpg)
+
 ---
 
-### Track B — RAG API
+<!-- ### Track B — RAG API
 
 #### Endpoints
 
@@ -762,9 +677,9 @@ make eval
 open http://localhost:5000
 ```
 
----
+--- -->
 
-## Observability
+<!-- ## Observability
 
 Three metrics are logged as structured JSON on every pipeline run:
 
@@ -796,7 +711,7 @@ aws s3 cp s3://$TLC_S3_BUCKET/emr-logs/emr_cleanse/2023-01-01/driver/stdout ./em
 open http://localhost:5000
 ```
 
----
+--- -->
 
 ## Engineering Practices
 
