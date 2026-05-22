@@ -26,3 +26,4 @@ logs/
 
 # mac/linux
 .DS_Store
+.env
