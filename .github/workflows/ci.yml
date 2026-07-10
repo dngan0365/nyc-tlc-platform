@@ -1,7 +1,12 @@
-# .github/workflows/ci.yml
 name: CI
 
-on: [push, pull_request]
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   lint-and-test:
@@ -13,30 +18,83 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+          cache: pip
 
       - name: Install dependencies
-        run: pip install -e ".[dev]"
+        run: python -m pip install --upgrade pip && python -m pip install -e ".[dev]"
+
+      - name: Prepare artifacts directory
+        run: mkdir -p artifacts
 
       - name: Lint (ruff)
-        run: ruff check .
+        run: |
+          set -euo pipefail
+          ruff check . | tee artifacts/ruff.txt
 
       - name: Format check (black)
-        run: black --check .
+        run: |
+          set -euo pipefail
+          black --check . | tee artifacts/black.txt
 
       - name: Unit tests
-        run: pytest tests/unit/ -v --cov=src
+        run: |
+          set -euo pipefail
+          pytest tests/unit/ -v --cov=src --cov-report=xml:artifacts/coverage.xml --junitxml=artifacts/unit-tests.xml | tee artifacts/unit-tests.txt
 
       - name: Build Docker image
-        run: docker build -t nyc-tlc-platform:ci .
+        run: |
+          set -euo pipefail
+          docker build -t nyc-tlc-platform:ci . | tee artifacts/docker-build.txt
+
+      - name: Upload CI artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-monitoring-${{ github.run_id }}
+          path: artifacts/
+          retention-days: 14
 
   integration-test:
     runs-on: ubuntu-latest
     needs: lint-and-test
     steps:
       - uses: actions/checkout@v4
-      - name: Integration test (sample pipeline)
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: python -m pip install --upgrade pip && python -m pip install -e ".[dev]"
+
+      - name: Prepare artifacts directory
+        run: mkdir -p artifacts
+
+      - name: Start integration services
         run: |
-          docker-compose -f infra/docker-compose.yml up -d
-          sleep 30
-          pytest tests/integration/ -v
-          docker-compose -f infra/docker-compose.yml down
+          set -euo pipefail
+          docker compose -f infra/docker-compose.yml up -d
+
+      - name: Run integration tests
+        run: |
+          set -euo pipefail
+          pytest tests/integration/ -v --junitxml=artifacts/integration-tests.xml | tee artifacts/integration-tests.txt
+
+      - name: Collect docker compose logs
+        if: always()
+        run: |
+          docker compose -f infra/docker-compose.yml logs > artifacts/docker-compose.log
+
+      - name: Tear down services
+        if: always()
+        run: docker compose -f infra/docker-compose.yml down
+
+      - name: Upload integration artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-monitoring-${{ github.run_id }}
+          path: artifacts/
+          retention-days: 14

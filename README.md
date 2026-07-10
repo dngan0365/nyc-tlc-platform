@@ -100,6 +100,41 @@ All services run locally via **docker-compose**. AWS infrastructure (EMR Serverl
 | `green_tripdata` | Green taxi trips (outer boroughs) | pickup_datetime + PULocationID |
 | `taxi_zone_lookup` | 263 NYC taxi zones with Borough + service zone | LocationID |
 
+### yellow_tripdata/ green_tripdata Schema
+
+| # | Field | Type | Description |
+|---|------|------|-------------|
+| 1 | vendorid | bigint | Identifier of the taxi vendor. Example: 1 = Creative Mobile Technologies, 2 = VeriFone. |
+| 2 | pickup_datetime | timestamp | Timestamp when the trip started (pickup time). |
+| 3 | dropoff_datetime | timestamp | Timestamp when the trip ended (dropoff time). |
+| 4 | passenger_count | bigint | Number of passengers in the trip. |
+| 5 | trip_distance | double | Total distance of the trip in miles. |
+| 6 | ratecodeid | bigint | Fare rate type applied to the trip (e.g., standard, airport, negotiated fare). |
+| 7 | store_and_fwd_flag | string | Flag indicating if trip data was stored temporarily in vehicle before sending. Y = Yes, N = No. |
+| 8 | pulocationid | bigint | Pickup taxi zone ID (foreign key to `taxi_zone_lookup.LocationID`). |
+| 9 | dolocationid | bigint | Dropoff taxi zone ID (foreign key to `taxi_zone_lookup.LocationID`). |
+| 10 | payment_type | bigint | Payment method used (cash, card, etc.). |
+| 11 | fare_amount | double | Base fare before taxes, tips, tolls, and surcharges. |
+| 12 | extra | double | Additional charges (e.g., night surcharge, rush hour surcharge). |
+| 13 | mta_tax | double | Metropolitan Transportation Authority tax. |
+| 14 | tip_amount | double | Tip amount paid by passenger (usually card payments). |
+| 15 | tolls_amount | double | Total toll fees during the trip. |
+| 16 | improvement_surcharge | double | Regulatory improvement surcharge added to taxi fares. |
+| 17 | total_amount | double | Final total amount charged to passenger (all components included). |
+| 18 | congestion_surcharge | double | NYC congestion surcharge applied to trips in congestion zones. |
+| 19 | airport_fee | double | Additional fee applied for airport pickups/dropoffs. |
+| 20 | cbd_congestion_fee | double | Central Business District congestion pricing fee (if applicable). |
+
+### taxi_zone_lookup Schema
+
+| Field | Type | Description |
+|---------|---------|-------------|
+| `LocationID` | Int64 | Unique identifier for a NYC Taxi & Limousine Commission (TLC) taxi zone. Used as the primary key and for joining with trip tables. |
+| `Borough` | String | New York City borough where the taxi zone is located (Manhattan, Brooklyn, Queens, Bronx, Staten Island, EWR, Unknown). |
+| `Zone` | String | Human-readable name of the taxi zone (e.g., Midtown Center, Upper East Side South, JFK Airport). |
+| `service_zone` | String | TLC service classification of the zone, such as Yellow Zone, Boro Zone, Airports, or EWR. |
+
+
 ### Time dimension
 
 All trips have `pickup_datetime` and `dropoff_datetime` timestamps. The pipeline partitions by
@@ -190,7 +225,7 @@ nyc-tlc-platform/
 
 ### Prerequisites
 
-| Tool | Version | Install |
+| Tool | Version | Install |V
 |---|---|---|
 | Docker + Docker Compose | Docker 24+ | [docs.docker.com](https://docs.docker.com/get-docker/) |
 | Python | 3.11 | [python.org](https://www.python.org/downloads/) |
@@ -228,18 +263,16 @@ AIRFLOW_FERNET_KEY=
 SUPERSET_SECRET_KEY=change-me-in-production
 ```
 
+If you already provisioned Terraform, generate the repo-managed environment file as well:
+
+```bash
+terraform output -json > infra/terraform/generated/outputs.json
+python infra/terraform/scripts/generate_env.py
+```
+
 ---
 
 ### Step 2 — Provision AWS infrastructure with Terraform
-aws sts get-caller-identity
-cd infra/terraform
-terraform init
-terraform plan -out=tfplan
-terraform fmt
-terraform validate
-terraform apply tfplan
-terraform output -json > 'outputs.json
-make upload-spark-jobs
 ```bash
 aws config
 aws sts get-caller-identity # Check identity
@@ -250,6 +283,8 @@ terraform init
 
 # Preview what will be created
 terraform plan -out=tfplan
+terraform fmt # (Optional) Format code
+terraform validate # (Optional) Check logic code
 terraform apply 
 # Apply (creates S3 buckets, EMR Serverless app, IAM roles, Glue catalog, Athena)
 terraform output -json > 'generated/outputs.json'
@@ -325,6 +360,8 @@ docker exec -it airflow-scheduler \
 | Athena Workgroup | `nyc-tlc-{env}` | SQL query engine for dbt + Superset |
 | S3 (Athena results) | `nyc-tlc-athena-results-{env}` | Athena query output storage |
 | VPC Endpoint | `s3` type | EMR workers access S3 without NAT Gateway |
+
+![AWS Architecture](./docs/assets/aws.png)
 
 ### S3 bucket structure
 
@@ -759,21 +796,38 @@ make eval             # Run RAG evaluation harness
 
 ### CI Pipeline (GitHub Actions)
 
-Every push to any branch triggers:
+Every push and pull request triggers the GitHub Actions checks below. Each workflow uploads artifacts so you can inspect failures after the run.
 
 ```
 lint-and-test
   ├── ruff check
   ├── black --check
   ├── pytest tests/unit/ --cov
-  └── docker build (produces image artifact)
+  └── docker build
 
 integration-test (after lint-and-test passes)
   ├── docker-compose up
   └── pytest tests/integration/
+
+security-scan
+  ├── pip-audit
+  └── bandit
 ```
 
 Pull requests require both jobs green before merge.
+
+Artifacts are uploaded as `ci-monitoring-*`, `integration-monitoring-*`, and `security-monitoring-*`.
+
+### GitHub Guardrails
+
+Set the following in GitHub repository settings for `main`:
+
+1. Require a pull request before merging.
+2. Require status checks to pass before merging.
+3. Require the checks `CI / lint-and-test`, `CI / integration-test`, and `Security Validation / security-scan`.
+4. Require review from CODEOWNERS for changes under `infra/`, `infra/terraform/`, `.github/workflows/`, and `pipelines/`.
+
+Repo-level Copilot instructions live in `.github/copilot-instructions.md`, and the security review agent is defined in `.github/agents/security-reviewer.agent.md`.
 
 ---
 

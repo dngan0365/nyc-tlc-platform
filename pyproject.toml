@@ -25,5 +25,9 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    "bandit>=1.8.6",
+    "black>=25.1.0",
+    "pip-audit>=2.9.0",
+    "pre-commit>=4.1.0",
     "ruff>=0.15.13",
 ]

@@ -1,0 +1,5 @@
+# Critical areas that should always get explicit review
+/infra/ @dngan0365
+/infra/terraform/ @dngan0365
+/.github/workflows/ @dngan0365
+/pipelines/ @dngan0365

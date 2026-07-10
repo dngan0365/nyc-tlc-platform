@@ -22,7 +22,7 @@
   "emr_application_id": {
     "sensitive": false,
     "type": "string",
-    "value": "00g5peoev9ao1m25"
+    "value": "00g69kje21hhd325"
   },
   "emr_execution_role_arn": {
     "sensitive": false,
